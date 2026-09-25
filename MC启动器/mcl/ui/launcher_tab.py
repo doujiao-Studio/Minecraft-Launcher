@@ -1,0 +1,224 @@
+"""启动器标签页：左侧已下载版本列表 + 右侧操作区/账户/进度 + 游戏控制台。"""
+from __future__ import annotations
+import os
+import re
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+from .. import config, java, launch, paths, versions
+from . import bus, widgets
+
+
+class LauncherTab(ttk.Frame):
+    def __init__(self, master):
+        super().__init__(master, padding=10)
+        self.game: launch.GameProcess | None = None
+
+        self._build_top()
+        self._build_console()
+        # 初始显示本地已下载版本
+        self._do_refresh()
+
+    # ---- 界面 ----
+    def _build_top(self):
+        main = ttk.Frame(self)
+        main.pack(fill="both", expand=True)
+
+        # 左：已下载版本列表
+        left = ttk.LabelFrame(main, text=" 已下载版本 ")
+        left.pack(side="left", fill="y", padx=(0, 8))
+        self.ver_list = tk.Listbox(left, width=24, height=16, activestyle="dotbox",
+                                   selectmode="browse",
+                                   font=("Microsoft YaHei UI", 10),
+                                   highlightbackground="#ccd3e6", bd=1, relief="solid")
+        self.ver_list.pack(fill="both", expand=True, padx=6, pady=6)
+        sb = ttk.Scrollbar(left, command=self.ver_list.yview)
+        self.ver_list.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y", pady=6, padx=(0, 6))
+        self.ver_list.bind("<<ListboxSelect>>", lambda e: self._select_version())
+        ttk.Button(left, text="刷新版本", command=self.refresh_versions).pack(
+            fill="x", padx=6, pady=(0, 6))
+
+        # 右：操作区 + 账户 + 进度 + 控制台
+        right = ttk.Frame(main)
+        right.pack(side="left", fill="both", expand=True)
+        self._right = right
+
+        ops = ttk.Frame(right)
+        ops.pack(fill="x")
+        self.launch_btn = ttk.Button(ops, text="启动游戏", command=self.launch_game)
+        self.launch_btn.pack(side="left", padx=2)
+        self.stop_btn = ttk.Button(ops, text="停止", command=self.stop_game)
+        self.stop_btn.pack(side="left", padx=2)
+        self.open_btn = ttk.Button(ops, text="打开目录", command=self.open_game_dir)
+        self.open_btn.pack(side="left", padx=2)
+
+        acc = ttk.Frame(right)
+        acc.pack(fill="x", pady=(6, 0))
+        ttk.Label(acc, text="游戏名:").pack(side="left")
+        self.name_var = tk.StringVar(value=config.get("user_name", "Steve"))
+        ttk.Entry(acc, textvariable=self.name_var, width=16).pack(side="left", padx=4)
+        ttk.Label(acc, text="JVM:").pack(side="left")
+        self.jvm_label = ttk.Label(acc, text=config.get("jvm_args", ""))
+        self.jvm_label.pack(side="left", padx=4)
+        ttk.Label(acc, text="Java:").pack(side="left")
+        self.java_label = ttk.Label(acc, text=self._java_desc())
+        self.java_label.pack(side="left", padx=4)
+
+        self.progress = widgets.make_progress(right)
+        self.progress.pack(fill="x", pady=(6, 0))
+        self.status_var = tk.StringVar(value="就绪")
+        ttk.Label(right, textvariable=self.status_var).pack(anchor="w", pady=(2, 0))
+
+    def _build_console(self):
+        con = ttk.LabelFrame(self._right, text="游戏控制台")
+        con.pack(fill="both", expand=True, pady=(6, 0))
+        self.console = widgets.Console(con, height=16)
+        self.console.pack(fill="both", expand=True)
+        self.console.on_command(self.send_game)
+
+    def _java_desc(self) -> str:
+        jp = java.effective_java()
+        if not jp:
+            return "未设置"
+        maj = java.java_major(jp)
+        return f"{os.path.basename(jp)} (Java {maj})"
+
+    # ---- 已下载版本 ----
+    @staticmethod
+    def _ver_key(name):
+        return [int(x) if x.isdigit() else x.lower()
+                for x in re.split(r"([0-9]+)", name)]
+
+    def _downloaded_versions(self):
+        out = []
+        vd = paths.versions_dir()
+        try:
+            for name in os.listdir(vd):
+                if name.startswith(".") or name in ("game", "__pycache__"):
+                    continue
+                if os.path.isdir(os.path.join(vd, name)):
+                    out.append(name)
+        except Exception:
+            pass
+        out.sort(key=self._ver_key)
+        return out
+
+    def refresh_versions(self):
+        self._do_refresh()
+
+    def _do_refresh(self):
+        ids = self._downloaded_versions()
+        self._fill_versions(ids)
+        if not ids:
+            self.status_var.set("暂无已下载版本，请到「下载中心」下载游戏")
+
+    def _fill_versions(self, ids):
+        self.ver_list.delete(0, "end")
+        for vid in ids:
+            self.ver_list.insert("end", vid)
+        cur = config.get("last_version", "")
+        if cur in ids:
+            i = ids.index(cur)
+            self.ver_list.selection_clear(0, "end")
+            self.ver_list.selection_set(i)
+            self.ver_list.see(i)
+        elif ids:
+            self.ver_list.selection_set(0)
+        self.status_var.set(f"共 {len(ids)} 个已下载版本")
+
+    # ---- 版本选择 ----
+    def selected_version(self) -> str:
+        sel = self.ver_list.curselection()
+        if sel:
+            return self.ver_list.get(sel[0])
+        return config.get("last_version", "")
+
+    def _select_version(self):
+        sel = self.ver_list.curselection()
+        if sel:
+            config.set("last_version", self.ver_list.get(sel[0]))
+
+    # ---- 加载锁 ----
+    def _set_loading(self, loading: bool):
+        """加载期间禁用操作按钮，禁止取消。"""
+        st = "disabled" if loading else "normal"
+        for b in (self.launch_btn, self.stop_btn, self.open_btn):
+            try:
+                b.configure(state=st)
+            except Exception:
+                pass
+        if loading:
+            self.status_var.set("正在加载游戏…（加载期间不可取消）")
+
+    # ---- 行为 ----
+    def launch_game(self):
+        vid = self.selected_version()
+        if not vid:
+            messagebox.showinfo("提示", "请先选择版本")
+            return
+        config.set("user_name", self.name_var.get() or "Steve")
+        self._set_loading(True)
+        bus.run_async(lambda: self._do_launch(vid), "launch")
+
+    def _do_launch(self, vid):
+        try:
+            self.console.append(f"[MCL] 正在准备启动 {vid} …")
+
+            # 先检查 Java 是否满足版本要求
+            try:
+                vjson = versions.parse_version_json(vid)
+                required = versions.required_java(vjson)
+            except Exception:
+                required = None
+            if required and not java.select_java_path(required):
+                best = java.highest_java()
+                best_major = java.java_major(best) if best else 0
+                msg = (f"版本 {vid} 需要 Java {required}，但本机最高只有 Java {best_major}"
+                       f"（{best or '未找到'}）。\n\n"
+                       f"请安装 Java {required} 或更高版本，"
+                       f"或在「下载中心」选择更低的 MC 版本（如 1.16.5 需要 Java 17）。")
+                self.console.append("[MCL] 中止启动：Java 版本不足，未开始下载")
+                bus.dispatch(lambda: messagebox.showerror("启动失败", msg))
+                return
+
+            def prog(stage, done, total):
+                bus.dispatch(lambda: self.status_var.set(f"{stage}  {int(done)}/{int(total)}"))
+                widgets.set_progress(self.progress, done, total)
+
+            try:
+                launch.download_client(vid, progress=prog)
+            except Exception as e:
+                bus.dispatch(lambda: messagebox.showerror("启动失败", f"资源下载失败:\n{e}"))
+                return
+            try:
+                cmd = launch.build_launch_command(vid)
+            except Exception as e:
+                bus.dispatch(lambda: messagebox.showerror("启动失败", str(e)))
+                return
+            self.console.append("[MCL] 资源就绪，拉起游戏进程…")
+            self.game = launch.GameProcess(cmd, self.console.append,
+                                           on_exit=lambda c: self.console.append(
+                                               f"[MCL] 游戏已退出 (code {c})"))
+            try:
+                self.game.start()
+            except Exception as e:
+                bus.dispatch(lambda: messagebox.showerror("启动失败", str(e)))
+                return
+        finally:
+            bus.dispatch(lambda: self._set_loading(False))
+
+    def stop_game(self):
+        if self.game:
+            self.game.stop(force=True)
+
+    def send_game(self, text: str):
+        if self.game:
+            self.game.send(text)
+
+    def open_game_dir(self):
+        vid = self.selected_version()
+        if not vid:
+            return
+        d = paths.game_dir(vid)
+        os.startfile(d)
