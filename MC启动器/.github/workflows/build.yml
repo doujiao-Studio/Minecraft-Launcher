@@ -23,24 +23,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller pillow
 
+      # 源码位于仓库的 MC启动器/ 子目录，构建需先切进去
       - name: Build single-file exe
+        working-directory: MC启动器
         run: pyinstaller MCL-Launcher.spec --noconfirm
 
       - name: Package release zip
+        working-directory: MC启动器/dist
         run: |
-          cd dist
-          powershell -Command "Compress-Archive -Path NCL.exe -DestinationPath NCL-免安装版.zip"
+          powershell -Command "Compress-Archive -Path NCL.exe -DestinationPath ../NCL-免安装版.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: NCL-免安装版
-          path: dist/NCL-免安装版.zip
+          path: MC启动器/NCL-免安装版.zip
 
       - name: Publish to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/NCL-免安装版.zip
+          files: MC启动器/NCL-免安装版.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
