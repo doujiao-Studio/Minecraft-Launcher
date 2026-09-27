@@ -622,6 +622,100 @@ def test_launch():
 
 
 # ==================================================================
+#  8b. 版本详情（模组 / 资源包 / 存档 / 数据包 扫描）
+# ==================================================================
+def _nbt_blob(name: str, gametype: int = 0, last: int = 1700000000000) -> bytes:
+    """手工构造一个最小 level.dat（gzip + NBT），用于测试解析。"""
+    import gzip as _gz
+
+    def s(x: str) -> bytes:
+        b = x.encode("utf-8")
+        return struct.pack(">H", len(b)) + b
+
+    ver = b"\x08" + s("Name") + s("1.21.1") + b"\x03" + s("Id") + \
+        struct.pack(">i", 21) + b"\x00"
+    data = (b"\x08" + s("LevelName") + s(name)
+            + b"\x03" + s("GameType") + struct.pack(">i", gametype)
+            + b"\x04" + s("LastPlayed") + struct.pack(">q", last)
+            + b"\x0a" + s("Version") + ver
+            + b"\x00")
+    inner = b"\x0a" + s("Data") + data + b"\x00"
+    return _gz.compress(b"\x0a" + s("") + inner + b"\x00")
+
+
+def test_version_detail():
+    group("版本详情")
+    from mcl.ui import version_detail as vd
+
+    g = os.path.join(TMP, "zz-detail-game")
+    for sub in ("mods", "resourcepacks", "saves", "datapacks"):
+        os.makedirs(os.path.join(g, sub), exist_ok=True)
+
+    # 模组（含一个禁用项）
+    open(os.path.join(g, "mods", "sodium.jar"), "wb").write(b"a" * 100)
+    open(os.path.join(g, "mods", "iris.jar.disabled"), "wb").write(b"b" * 50)
+    open(os.path.join(g, "mods", "readme.txt"), "w").write("不应计入")
+    mods = vd.scan_mods(g)
+    check("扫描到 2 个模组", len(mods) == 2, str([m["name"] for m in mods]))
+    check("禁用模组被标记", any((not m["enabled"]) for m in mods))
+    check("禁用项去掉 .disabled 后缀",
+          any(m["name"] == "iris.jar" and not m["enabled"] for m in mods))
+    check("非模组文件被忽略", all(m["name"].endswith((".jar", ".zip")) for m in mods))
+
+    # 资源包（zip + 文件夹）
+    open(os.path.join(g, "resourcepacks", "faithful.zip"), "wb").write(b"c" * 200)
+    os.makedirs(os.path.join(g, "resourcepacks", "my_pack"), exist_ok=True)
+    open(os.path.join(g, "resourcepacks", "my_pack", "pack.mcmeta"), "w").write("{}")
+    os.makedirs(os.path.join(g, "resourcepacks", "not_a_pack"), exist_ok=True)
+    rps = vd.scan_resourcepacks(g)
+    check("扫描到 2 个资源包", len(rps) == 2, str([r["name"] for r in rps]))
+    check("文件夹资源包也识别",
+          any(r["name"] == "my_pack" and r["detail"] == "文件夹" for r in rps))
+    check("无 pack.mcmeta 的目录被忽略",
+          all(r["name"] != "not_a_pack" for r in rps))
+
+    # 存档（含 level.dat）
+    sd = os.path.join(g, "saves", "New World")
+    os.makedirs(sd, exist_ok=True)
+    with open(os.path.join(sd, "level.dat"), "wb") as f:
+        f.write(_nbt_blob("我的世界", 1))
+    open(os.path.join(sd, "icon.png"), "wb").write(b"png")
+    os.makedirs(os.path.join(g, "saves", "空存档"), exist_ok=True)
+    saves = vd.scan_saves(g)
+    check("扫描到 2 个存档", len(saves) == 2, str([s["name"] for s in saves]))
+    named = [s for s in saves if s["name"] == "我的世界"]
+    check("level.dat 解析出世界名", bool(named), str([s["name"] for s in saves]))
+    check("level.dat 解析出游戏模式", named and "创造" in named[0]["detail"],
+          named[0]["detail"] if named else "")
+    check("level.dat 解析出 MC 版本", named and "1.21.1" in named[0]["detail"],
+          named[0]["detail"] if named else "")
+    check("存档带图标路径", named and named[0]["icon"].endswith("icon.png"))
+    check("无 level.dat 的存档不报错",
+          any(s["name"] == "空存档" for s in saves))
+    check("read_level_dat 容错垃圾文件",
+          (open(os.path.join(g, "bad.dat"), "wb").write(b"not nbt") or
+           vd.read_level_dat(os.path.join(g, "bad.dat")) == {}))
+
+    # 数据包（全局 + 存档内）
+    open(os.path.join(g, "datapacks", "global_pack.zip"), "wb").write(b"d" * 30)
+    dps_dir = os.path.join(sd, "datapacks")
+    os.makedirs(dps_dir, exist_ok=True)
+    os.makedirs(os.path.join(dps_dir, "world_pack"), exist_ok=True)
+    open(os.path.join(dps_dir, "world_pack", "pack.mcmeta"), "w").write("{}")
+    dps = vd.scan_datapacks(g)
+    check("扫描到 2 个数据包", len(dps) == 2, str([d["name"] for d in dps]))
+    check("数据包标明所属范围",
+          any("全局" in d["detail"] for d in dps) and
+          any("存档" in d["detail"] for d in dps))
+
+    # 目录大小统计（100 + 50 的 jar + 15 字节的 txt）
+    expect = 100 + 50 + len("不应计入".encode("utf-8"))
+    check("dir_size 统计非空", vd.dir_size(os.path.join(g, "mods")) == expect,
+          str(vd.dir_size(os.path.join(g, "mods"))))
+    check("空的详情目录不炸", vd.scan_mods(os.path.join(TMP, "no-such-dir")) == [])
+
+
+# ==================================================================
 #  9. UI（真实 Tk）
 # ==================================================================
 def make_png(path: str, size: int = 128) -> str:
@@ -940,6 +1034,36 @@ def test_ui():
     check("六页签切换无异常", len(app._nb.tabs()) == 6)
     check("点击动画批量绑定", anim.bind_click_all(root) >= 10)
     check("标题栏渐变已绘制", app._bar.find_withtag("grad") != ())
+    # --- 版本详情窗口（模组 / 资源包 / 存档 / 数据包） ---
+    from mcl.ui.version_detail import VersionDetailWindow
+    dw = VersionDetailWindow(root, "zz-test-ver")
+    pump(300)
+    check("详情窗口标题含版本名", "zz-test-ver" in dw.title(), dw.title())
+    check("详情窗口四个子页", len(dw._panes) == 4, str(len(dw._panes)))
+    check("详情窗口指向游戏目录",
+          dw.game_dir.endswith(os.path.join(".minecraft", "zz-test-ver")),
+          dw.game_dir)
+    fake_items = [{"name": "Demo Mod", "path": os.path.join(TMP, "demo.jar"),
+                   "size": 1024, "mtime": time.time(), "detail": "已启用",
+                   "enabled": True},
+                  {"name": "Off Mod", "path": os.path.join(TMP, "off.jar"),
+                   "size": 2048, "mtime": time.time(), "detail": "已禁用",
+                   "enabled": False}]
+    dw._fill(fake_items, [], [], [])
+    pump(150)
+    check("详情列表填入 2 行", len(dw._panes[0].tree.get_children()) == 2)
+    check("计数显示总数", "共 2 项" in dw._panes[0].count_var.get(),
+          dw._panes[0].count_var.get())
+    check("禁用模组带灰色标签",
+          "off" in dw._panes[0].tree.item("i1", "tags"))
+    dw._fill([], [], [], [])
+    pump(120)
+    check("空列表显示引导文案",
+          bool(dw._panes[0].empty_lbl.winfo_ismapped()) and
+          "还没有装模组" in dw._panes[0].empty_var.get(),
+          dw._panes[0].empty_var.get())
+    dw.destroy()
+
     win.destroy()
     root.destroy()
     if errors:
@@ -965,7 +1089,7 @@ def main() -> int:
     t0 = time.time()
     for fn in (test_config_paths, test_bootstrap, test_utils, test_network, test_versions,
                test_java, test_modrinth, test_translate, test_accounts,
-               test_dispatch_closures, test_launch, test_ui):
+               test_dispatch_closures, test_launch, test_version_detail, test_ui):
         try:
             fn()
         except Exception:
