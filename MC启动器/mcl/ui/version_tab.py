@@ -44,7 +44,8 @@ class VersionTab(ttk.Frame):
         row.pack(fill="x", pady=(0, 6))
         ttk.Button(row, text="刷新已安装版本", style="Accent.TButton",
                    command=self.refresh).pack(side="left")
-        ttk.Label(row, text="以下为已在本地下载完整资源的版本，可添加模组 / 资源包或打开对应文件夹管理",
+        ttk.Button(row, text="查看详情", command=self.open_detail).pack(side="left", padx=6)
+        ttk.Label(row, text="双击任一版本可查看其模组 / 资源包 / 存档 / 数据包",
                   style="Muted.TLabel").pack(side="left", padx=10)
 
     def _build_list(self):
@@ -66,11 +67,14 @@ class VersionTab(ttk.Frame):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
         vsb.pack(side="right", fill="y", padx=(0, 8), pady=8)
+        self.tree.bind("<Double-1>", lambda e: self.open_detail())
+        self.tree.bind("<Return>", lambda e: self.open_detail())
 
     def _build_actions(self):
         bar = ttk.Frame(self)
         bar.pack(fill="x", pady=(6, 0))
         for text, tip, cmd in [
+            ("🔍 查看详情", "查看该版本的模组 / 资源包 / 存档 / 数据包列表", self.open_detail),
             ("📂 打开模组文件夹", "打开当前版本的 mods 目录", self.open_mods),
             ("🎨 打开资源包文件夹", "打开当前版本的 resourcepacks 目录", self.open_rp),
             ("🗺 打开存档文件夹", "打开当前版本的 saves 目录", self.open_saves),
@@ -85,6 +89,17 @@ class VersionTab(ttk.Frame):
             widgets_tooltip(b, tip)
 
     # ---- 行为 ----
+    def open_detail(self):
+        """打开版本详情窗口：模组 / 资源包 / 存档 / 数据包。"""
+        vid = self._need_version()
+        if not vid:
+            return
+        try:
+            from .version_detail import VersionDetailWindow
+            VersionDetailWindow(self.winfo_toplevel(), vid)
+        except Exception as e:
+            messagebox.showerror("打开详情失败", str(e))
+
     def _selected(self) -> str | None:
         sel = self.tree.selection()
         return sel[0] if sel else None
