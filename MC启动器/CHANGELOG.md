@@ -12,7 +12,7 @@
   - `NCLData/`：versions、servers、relay、logs、cache
   - `.minecraft/`：saves、mods、resourcepacks、shaderpacks、screenshots、config、logs、crash-reports
   - 默认 `config.json`（含离线 uuid）随首次启动落盘
-- 首次启动自动弹出欢迎引导，并跳转「下载中心 → 游戏本体」，选个版本下载完就能开玩
+- 首次启动**静默创建**上述目录，不弹任何提示框；只在状态栏标出数据目录 / 游戏目录位置，并自动跳到「下载中心 → 游戏本体」，选个版本下载完就能开玩
 - exe 放在受保护目录（如 `C:\Program Files`）写不进时，自动回退到 `%LOCALAPPDATA%\NCL-Launcher`
 - 不再提供 zip 免安装包：exe 本身就是绿色版，解压步骤都省了，下载体积也更小
 
