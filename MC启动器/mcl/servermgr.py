@@ -193,7 +193,7 @@ def write_props(name: str, props: dict) -> None:
         lines.append(f"{k}={v}")
     with open(p, "w", encoding="utf-8") as f:
         f.write("#Minecraft server properties\n")
-        f.write("#由 MCL-神启动器生成\n")
+        f.write("#由 NCL 启动器生成\n")
         f.write("\n".join(lines) + "\n")
     log.info("写入 %s 配置", p)
 

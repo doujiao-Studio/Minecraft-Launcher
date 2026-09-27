@@ -23,7 +23,7 @@ class DownloadError(Exception):
 
 
 def _ua() -> dict:
-    return {"User-Agent": "MCL-ShenLauncher/1.0 (python)"}
+    return {"User-Agent": "NCL/1.0 (python)"}
 
 
 def resolve_meta_base() -> str:
@@ -50,17 +50,12 @@ def resolve_version_json(version_id: str) -> str:
 
 
 def resolve_client_jar(version_id: str) -> str:
-    m = config.get("mirror", "auto")
-    if m == "mojang":
-        # Mojang 侧 client jar 必须从 version json 里取 url；这里用 BMCLAPI 兜底
-        return f"{BMCLAPI}/version/{version_id}/client"
+    # Mojang 侧 client jar 必须从版本 JSON 里取 url（launch.py 已优先使用），
+    # 这里统一用 BMCLAPI 兜底。
     return f"{BMCLAPI}/version/{version_id}/client"
 
 
 def resolve_server_jar(version_id: str) -> str:
-    m = config.get("mirror", "auto")
-    if m == "mojang":
-        return f"{BMCLAPI}/version/{version_id}/server"
     return f"{BMCLAPI}/version/{version_id}/server"
 
 
@@ -79,9 +74,7 @@ def resolve_asset(hash_hex: str) -> str:
 
 
 def resolve_asset_index(index_id: str) -> str:
-    m = config.get("mirror", "auto")
-    if m == "mojang":
-        return f"{MOJANG_META}/mc/game/current_java/assetIndex.json"  # 备用
+    # 资源索引优先用版本 JSON 自带地址（launch.py 已先尝试），这里统一镜像兜底。
     return f"{BMCLAPI}/indexes/{index_id}.json"
 
 
@@ -107,8 +100,9 @@ def download(
     expected_sha1: Optional[str] = None,
     progress: Optional[Callable[[int, int], None]] = None,
     timeout: int = 60,
+    retries: int = 3,
 ) -> str:
-    """下载到 dest。若文件已存在且 sha1 匹配则跳过。返回 dest。"""
+    """下载到 dest。若文件已存在且 sha1 匹配则跳过。失败自动重试。返回 dest。"""
     if expected_sha1 and os.path.exists(dest):
         try:
             if utils.sha1_file(dest) == expected_sha1:
@@ -117,6 +111,33 @@ def download(
             pass
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     tmp = dest + ".part"
+    last_err: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            _download_once(url, tmp, progress, timeout)
+            break
+        except DownloadError as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(0.6 * attempt)  # 简单退避
+    else:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise last_err  # type: ignore[misc]
+    if expected_sha1:
+        h = utils.sha1_file(tmp)
+        if h != expected_sha1:
+            os.remove(tmp)
+            raise DownloadError(f"SHA1 不匹配: {url} 期望 {expected_sha1[:12]} 实际 {h[:12]}")
+    os.replace(tmp, dest)
+    return dest
+
+
+def _download_once(url: str, tmp: str,
+                   progress: Optional[Callable[[int, int], None]],
+                   timeout: int) -> None:
     req = urllib.request.Request(url, headers=_ua())
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -135,10 +156,5 @@ def download(
         raise DownloadError(f"HTTP {e.code} {url}") from e
     except urllib.error.URLError as e:
         raise DownloadError(f"网络错误 {url}: {e.reason}") from e
-    if expected_sha1:
-        h = utils.sha1_file(tmp)
-        if h != expected_sha1:
-            os.remove(tmp)
-            raise DownloadError(f"SHA1 不匹配: {url} 期望 {expected_sha1[:12]} 实际 {h[:12]}")
-    os.replace(tmp, dest)
-    return dest
+    except (TimeoutError, ConnectionError, OSError) as e:
+        raise DownloadError(f"连接中断 {url}: {e}") from e

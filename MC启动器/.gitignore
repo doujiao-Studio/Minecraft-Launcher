@@ -1,0 +1,30 @@
+# ===== 运行时数据（不进仓库）=====
+.minecraft/
+NCLData/
+
+# ===== 设计源文件（非运行所需，体积大）=====
+assets/icon.png
+assets/icon_src.png
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# ===== 构建产物 =====
+build/
+dist/
+*.spec.bak
+*.log
+
+# ===== 系统 / 编辑器 =====
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ===== WorkBuddy 内部 =====
+.workbuddy/
+
+# ===== 打包产物（单文件 exe 体积大，走 Release 下载）=====
+NCL.exe

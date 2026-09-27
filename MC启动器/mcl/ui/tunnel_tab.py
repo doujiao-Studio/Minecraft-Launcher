@@ -119,18 +119,18 @@ class TunnelTab(ttk.Frame):
 
     def copy_relay_cmd(self):
         host = self.r_host.get().strip() or "你的公网IP"
-        token = self.r_token.get().strip() or "mcl"
+        token = self.r_token.get().strip() or "ncl"
         cmd = (f'& "D:\\python 3.15.0rc2\\python.exe" -m mcl.tunnel.relay_server '
                f'--control-port 6000 --token {token} --public-host {host}')
         self._clip(cmd)
-        self.tconsole.append(f"[MCL] 在公网机器上运行：\n  {cmd}")
+        self.tconsole.append(f"[NCL] 在公网机器上运行：\n  {cmd}")
 
     def show_relay_help(self):
         msg = (
             "【自建中继服务器怎么做】\n"
             "1. 找一台有公网 IP 的机器（免费云主机、同学/朋友的公网主机都行）；\n"
             "2. 在上面也安装 Python，把本程序目录拷过去，运行：\n"
-            f"   python -m mcl.tunnel.relay_server --token {self.r_token.get() or 'mcl'} --public-host 你的IP\n"
+            f"   python -m mcl.tunnel.relay_server --token {self.r_token.get() or 'ncl'} --public-host 你的IP\n"
             "3. 在本地这里填上那台机器的地址、控制端口(6000)、相同密钥，点「启动隧道」；\n"
             "4. 把「中继公网地址:映射端口」发给好友，他们即可加入你的服务器。\n\n"
             "原理：中继负责在公网开放一个端口并转发，本地只需向外发起连接即可，"
@@ -140,7 +140,7 @@ class TunnelTab(ttk.Frame):
 
     def copy_ext(self):
         self._clip(self.ext_cmd.get())
-        self.tconsole.append("[MCL] 已复制免费隧道命令，请在本机终端运行。")
+        self.tconsole.append("[NCL] 已复制免费隧道命令，请在本机终端运行。")
 
     def _clip(self, text: str):
         try:

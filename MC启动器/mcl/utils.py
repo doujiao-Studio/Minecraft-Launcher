@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import logging
+import logging.handlers
 import os
 import sys
 import threading
@@ -20,8 +21,10 @@ def _init_log() -> None:
         if _LOG_INITED:
             return
         os.makedirs(paths.log_dir(), exist_ok=True)
-        handler = logging.FileHandler(
-            os.path.join(paths.log_dir(), "mcl.log"), encoding="utf-8"
+        # 轮转日志：单文件最大 1MB、保留 3 个备份，避免 mcl.log 无限膨胀
+        handler = logging.handlers.RotatingFileHandler(
+            os.path.join(paths.log_dir(), "mcl.log"), maxBytes=1024 * 1024,
+            backupCount=3, encoding="utf-8"
         )
         handler.setFormatter(
             logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")

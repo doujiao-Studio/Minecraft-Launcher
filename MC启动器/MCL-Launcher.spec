@@ -5,14 +5,18 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets')],
-    hiddenimports=[],
+    # 仅打包运行时实际用到的图标；icon.png / icon_src.png 为设计源文件，不进 exe
+    datas=[('assets/icon.ico', 'assets'),
+           ('assets/icon_small.png', 'assets'),
+           ('assets/icon_tiny.png', 'assets')],
+    hiddenimports=['PIL', 'PIL.Image', 'PIL.ImageOps', 'PIL._webp'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['numpy', 'pandas', 'matplotlib', 'PIL', 'PyQt5', 'PyQt6',
+              'PySide2', 'PySide6', 'wx', 'test', 'unittest', 'pydoc'],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 pyz = PYZ(a.pure)
 
@@ -22,7 +26,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MCL-Launcher',
+    name='NCL',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

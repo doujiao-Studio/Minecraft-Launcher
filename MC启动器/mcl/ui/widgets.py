@@ -5,8 +5,86 @@ from tkinter import ttk
 from . import bus
 
 
+class CardGrid(tk.Frame):
+    """可滚动卡片网格：列数随宽度自适应，卡片铺满每一行。
+
+    用于模组/资源包列表，替代原来的表格，让列表铺满整页。
+    """
+
+    def __init__(self, master, card_w: int = 320, card_h: int = 104,
+                 pad: int = 10, bg=None):
+        super().__init__(master)
+        self._bg = bg if bg is not None else "#eef1f7"
+        self.card_w, self.card_h, self.pad = card_w, card_h, pad
+        self.canvas = tk.Canvas(self, highlightthickness=0, bg=self._bg)
+        self.vsb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.inner = tk.Frame(self.canvas, bg=self._bg)
+        self._win = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.vsb.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.vsb.pack(side="right", fill="y")
+        self.inner.bind("<Configure>",
+                        lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", self._on_resize)
+        self.canvas.bind("<Enter>", self._grab_wheel)
+        self.canvas.bind("<Leave>", self._release_wheel)
+        self.inner.bind("<Enter>", self._grab_wheel)
+        self._cards: list = []
+        self._cols = 1
+
+    def clear(self) -> None:
+        for c in self._cards:
+            try:
+                c.destroy()
+            except Exception:
+                pass
+        self._cards = []
+        self.canvas.yview_moveto(0)
+        self.canvas.configure(scrollregion=(0, 0, 0, 0))
+
+    def add(self, card) -> None:
+        self._cards.append(card)
+        self._relayout()
+
+    @property
+    def cards(self) -> list:
+        return self._cards
+
+    def _on_resize(self, e):
+        self.canvas.itemconfigure(self._win, width=e.width)
+        self._relayout()
+
+    def _relayout(self) -> None:
+        if not self._cards:
+            return
+        w = self.canvas.winfo_width() or (self.card_w + self.pad) * 2
+        cols = max(1, int((w - self.pad) // (self.card_w + self.pad)))
+        for i, c in enumerate(self._cards):
+            c.grid(row=i // cols, column=i % cols,
+                   padx=self.pad // 2, pady=self.pad // 2, sticky="nsew")
+        for col in range(cols):
+            self.inner.grid_columnconfigure(col, weight=1, uniform="cardcol")
+        self._cols = cols
+        self.inner.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _grab_wheel(self, _e):
+        self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+
+    def _release_wheel(self, _e):
+        try:
+            self.canvas.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+
+    def _on_wheel(self, e):
+        self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+
+
 class Console(tk.Frame):
-    """日志/控制台：可从任意线程 append。"""
+    """日志/控制台：可从任意线程 append。自动裁剪旧行，防止长时间运行卡顿。"""
+
+    MAX_LINES = 4000  # 超出后丢弃最旧的 1/4
 
     def __init__(self, master, height=12, state="disabled"):
         super().__init__(master)
@@ -31,6 +109,11 @@ class Console(tk.Frame):
     def _write(self, line: str) -> None:
         self.text.configure(state="normal")
         self.text.insert("end", line)
+        # 裁剪：行数超过上限时删除最旧的 1/4，避免 Text 控件无限膨胀卡顿
+        lines = int(self.text.index("end-1c").split(".")[0])
+        if lines > self.MAX_LINES:
+            cut = lines - self.MAX_LINES + self.MAX_LINES // 4
+            self.text.delete("1.0", f"{cut}.0")
         self.text.see("end")
         if self._state == "disabled":
             self.text.configure(state="disabled")
@@ -118,11 +201,14 @@ class ToolTip:
 
 
 class ScrollableFrame(ttk.Frame):
-    """垂直滚动容器：内容超出可视区时出现滚动条，用于内容较多的页面。"""
+    """垂直滚动容器：内容超出可视区时出现滚动条，用于内容较多的页面。
+
+    滚轮事件只在鼠标进入容器时接管（离开时解除全局绑定），
+    避免多个实例共存时 bind_all 互相干扰与泄漏。"""
 
     def __init__(self, master, bg=None, **kw):
         super().__init__(master, **kw)
-        self._bg = bg if bg is not None else "#f5f6fa"
+        self._bg = bg if bg is not None else "#eef1f7"
         self.canvas = tk.Canvas(self, highlightthickness=0, bg=self._bg)
         self.vsb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.inner = ttk.Frame(self.canvas, padding=(2, 2))
@@ -132,7 +218,11 @@ class ScrollableFrame(ttk.Frame):
         self.vsb.pack(side="right", fill="y")
         self.inner.bind("<Configure>", self._on_inner)
         self.canvas.bind("<Configure>", self._on_canvas)
-        self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+        self.canvas.bind("<Enter>", self._grab_wheel)
+        self.canvas.bind("<Leave>", self._release_wheel)
+        # 子控件也需要触发接管：递归绑定
+        self.inner.bind("<Enter>", self._grab_wheel)
+        self.bind("<Destroy>", lambda e: self._release_wheel(None))
 
     def _on_inner(self, _e):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -140,13 +230,14 @@ class ScrollableFrame(ttk.Frame):
     def _on_canvas(self, e):
         self.canvas.itemconfigure(self._win, width=e.width)
 
-    def _on_wheel(self, e):
-        # 仅当鼠标位于本容器内时滚动
-        x = self.winfo_pointerx()
-        y = self.winfo_pointery()
+    def _grab_wheel(self, _e):
+        self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+
+    def _release_wheel(self, _e):
         try:
-            rx = self.winfo_rootx(); ry = self.winfo_rooty()
-            if rx <= x <= rx + self.winfo_width() and ry <= y <= ry + self.winfo_height():
-                self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+            self.canvas.unbind_all("<MouseWheel>")
         except Exception:
             pass
+
+    def _on_wheel(self, e):
+        self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")

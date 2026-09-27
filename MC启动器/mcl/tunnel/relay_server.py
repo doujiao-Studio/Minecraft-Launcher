@@ -69,8 +69,8 @@ class RelayServer:
         listener.listen(64)
         log.info("中继启动：控制端口 %s，数据端口 %s-%s，公网地址 %s",
                  self.control_port, self.data_low, self.data_high, self.public_host)
-        print(f"[MCL中继] 控制端口 {self.control_port} | 数据端口范围 {self.data_low}-{self.data_high}")
-        print(f"[MCL中继] 公网地址 {self.public_host} | token: {self.token}")
+        print(f"[NCL中继] 控制端口 {self.control_port} | 数据端口范围 {self.data_low}-{self.data_high}")
+        print(f"[NCL中继] 公网地址 {self.public_host} | token: {self.token}")
         try:
             while self._running:
                 conn, addr = listener.accept()
@@ -237,10 +237,10 @@ def _expired(mark: float, secs: float) -> bool:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="MCL 中继服务器（内网穿透服务端）")
+    ap = argparse.ArgumentParser(description="NCL 中继服务器（内网穿透服务端）")
     ap.add_argument("--control-port", type=int, default=6000)
     ap.add_argument("--data-range", default="20000-20100")
-    ap.add_argument("--token", default="mcl")
+    ap.add_argument("--token", default="ncl")
     ap.add_argument("--public-host", default="")
     args = ap.parse_args()
     low, high = args.data_range.split("-")

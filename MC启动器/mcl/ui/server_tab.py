@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .. import config, network, paths, servermgr, versions
-from . import bus, widgets
+from . import bus, navbar, widgets
 
 
 class ServerTab(ttk.Frame):
@@ -75,10 +75,12 @@ class ServerTab(ttk.Frame):
 
     def _build_tabs(self):
         nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, pady=(6, 0))
         self._build_props(nb)
         self._build_players(nb)
         self._build_backups(nb)
+        # 子页签：自绘导航条（选中态颜色渐变 + 指示条滑动），须先于 nb pack
+        navbar.NavTabs(self, nb).pack(fill="x", padx=8, pady=(6, 2))
+        nb.pack(fill="both", expand=True, padx=8, pady=(0, 0))
 
     def _build_props(self, nb):
         f = ttk.Frame(nb, padding=8)
@@ -143,10 +145,13 @@ class ServerTab(ttk.Frame):
             return
 
         def do():
-            self.create_status.configure(text=f"正在创建 {name} ({vtype} {vid}) …")
+            # 工作线程不能直接操作 Tk 控件，统一投递回主线程
+            bus.dispatch(lambda: self.create_status.configure(
+                text=f"正在创建 {name} ({vtype} {vid}) …"))
             try:
                 servermgr.create_server(name, vtype, vid,
-                                        progress=lambda s, p: self.create_status.configure(text=s))
+                                        progress=lambda s, p: bus.dispatch(
+                                            lambda: self.create_status.configure(text=s)))
                 bus.dispatch(lambda: (self.create_status.configure(text="创建完成"),
                                       self.refresh_list()))
             except Exception as e:
@@ -180,7 +185,7 @@ class ServerTab(ttk.Frame):
         name = self._selected()
         if not name:
             return
-        self.console.append(f"[MCL] 发送停止命令到 {name} …")
+        self.console.append(f"[NCL] 发送停止命令到 {name} …")
         bus.run_async(lambda: servermgr.stop(name), "stop-server")
 
     def send_cmd(self):
@@ -220,7 +225,7 @@ class ServerTab(ttk.Frame):
                 p[_key_map()[key]] = var.get()
         p["online-mode"] = "true" if self.online_var.get() else "false"
         servermgr.write_props(name, p)
-        self.console.append(f"[MCL] 已保存 {name} 的配置")
+        self.console.append(f"[NCL] 已保存 {name} 的配置")
 
     def save_players(self):
         name = self._selected()
@@ -230,7 +235,7 @@ class ServerTab(ttk.Frame):
         o = [x.strip() for x in self.ops_txt.get("1.0", "end").splitlines() if x.strip()]
         servermgr.write_player_list(name, "whitelist", w)
         servermgr.write_player_list(name, "ops", o)
-        self.console.append(f"[MCL] 已保存 {name} 的名单")
+        self.console.append(f"[NCL] 已保存 {name} 的名单")
 
     def backup(self):
         name = self._selected()
@@ -241,7 +246,7 @@ class ServerTab(ttk.Frame):
     def _do_backup(self, name):
         try:
             dest = servermgr.backup(name)
-            bus.dispatch(lambda: (self.console.append(f"[MCL] 备份完成: {dest}"),
+            bus.dispatch(lambda: (self.console.append(f"[NCL] 备份完成: {dest}"),
                                   self.refresh_backups()))
         except Exception as e:
             bus.dispatch(lambda: messagebox.showerror("备份失败", str(e)))

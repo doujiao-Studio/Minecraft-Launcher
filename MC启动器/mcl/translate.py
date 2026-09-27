@@ -163,8 +163,47 @@ def translate(text: str, to_zh: bool = True) -> str:
     return out
 
 
+# 中文搜索词 -> 英文（本地即时映射，不依赖网络；在线翻译 429 时兜底）
+_SEARCH_DICT = {
+    "性能优化": "optimize", "优化": "optimize", "性能": "performance",
+    "光影": "shader", "光影着色": "shader", "高清修复": "optifine",
+    "小地图": "minimap", "地图": "map", "世界地图": "world map",
+    "旅行地图": "journeymap", "投影": "litematica", "创世神": "worldedit",
+    "钠": "sodium", "锂": "lithium", "磷": "phosphor",
+    "背包整理": "inventory sorting", "背包": "backpack", "背包扩容": "backpack",
+    "合成表": "recipe", "物品管理": "jei", "物品管理器": "jei",
+    "鞘翅": "elytra", "飞行": "elytra",
+    "汉化": "chinese localization", "中文": "chinese",
+    "材质": "texture", "皮肤": "skin",
+    "更多生物": "more mobs", "生物": "mob", "更多动物": "more animals",
+    "龙": "dragon", "暮色": "twilight forest", "匠魂": "tinkers construct",
+    "工业": "industrial craft", "科技": "technology", "魔法": "magic",
+    "机械动力": "create", "机械": "create", "家具": "furniture",
+    "女仆": "maid", "更好的": "better",
+    "加速": "accelerate", "帧率": "fps", "帧": "fps", "卡顿": "lag",
+    "生物群系": "biome", "维度": "dimension", "传送": "teleport",
+    "建筑": "building", "武器": "weapon", "盔甲": "armor", "食物": "food",
+    "宠物": "pet", "附魔": "enchant", "红石": "redstone",
+    "末地": "end", "地狱": "nether", "下界": "nether", "洞穴": "cave",
+    "地形": "terrain", "世界生成": "worldgen", "农业": "farming",
+    "村民": "villager", "交易": "trade", "饰品": "bauble",
+    "实体": "entity", "伤害": "damage", "血量": "health", "生命值": "health",
+    "自然": "nature", "装饰": "decoration", "声音": "sound", "音效": "sound",
+    "音乐": "music", "放大": "zoom", "像素": "pixel",
+    "成就": "advancement", "进度": "advancement", "末影": "ender",
+    "守卫者": "guardian", "幽灵": "phantom", "守卫": "guardian",
+}
+
+
 def to_english(query: str) -> str:
-    return translate(query, to_zh=False)
+    """中文搜索词 -> 英文。优先本地词典（即时），否则在线翻译（失败回退原文）。"""
+    q = (query or "").strip()
+    if not q:
+        return q
+    hit = _SEARCH_DICT.get(q)
+    if hit:
+        return hit
+    return translate(q, to_zh=False)
 
 
 def translate_batch(items: list[str], to_zh: bool = True, workers: int = 2) -> list[str]:

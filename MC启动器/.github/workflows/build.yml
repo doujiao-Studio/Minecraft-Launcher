@@ -1,0 +1,46 @@
+name: Build NCL Launcher (Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pillow
+
+      - name: Build single-file exe
+        run: pyinstaller MCL-Launcher.spec --noconfirm
+
+      - name: Package release zip
+        run: |
+          cd dist
+          powershell -Command "Compress-Archive -Path NCL.exe -DestinationPath NCL-免安装版.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NCL-免安装版
+          path: dist/NCL-免安装版.zip
+
+      - name: Publish to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/NCL-免安装版.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

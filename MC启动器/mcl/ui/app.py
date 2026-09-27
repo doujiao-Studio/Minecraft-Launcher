@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .. import config, paths
-from . import bus, theme
+from . import anim, bus, navbar, theme
 from .download_center_tab import DownloadCenterTab
 from .launcher_tab import LauncherTab
 from .server_tab import ServerTab
@@ -46,7 +46,7 @@ class MainWindow:
         root.configure(bg=theme.BG)
         root.geometry("980x780")
         root.minsize(860, 660)
-        root.title("MCL·神启动器")
+        root.title("NCL 启动器")
 
         try:
             icon = tk.PhotoImage(file=_asset("icon_small.png"))
@@ -64,6 +64,8 @@ class MainWindow:
         self._build_notebook()
         self._build_status()
         self._build_resize_grip()
+        # 给所有按钮挂上点击动画
+        anim.bind_click_all(root)
 
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._minimizing = False
@@ -120,7 +122,7 @@ class MainWindow:
             fw = ctypes.windll.user32.FindWindowW
             fw.argtypes = [wt.LPCWSTR, wt.LPCWSTR]
             fw.restype = wt.HWND
-            h2 = fw(None, "MCL·神启动器")
+            h2 = fw(None, "NCL 启动器")
             if h2:
                 hwnd = h2
         except Exception:
@@ -158,51 +160,103 @@ class MainWindow:
         except Exception:
             pass
 
-    # ---------- 自绘标题栏 ----------
+    # ---------- 自绘标题栏（Canvas 渐变） ----------
+    _BAR_H = 60
+    _BTN_W = 48
+
     def _build_titlebar(self):
-        bar = tk.Frame(self.root, bg=theme.PRIMARY, height=58)
+        bar = tk.Canvas(self.root, height=self._BAR_H, highlightthickness=0, bd=0,
+                        bg=theme.PRIMARY, cursor="arrow")
         bar.pack(fill="x")
-        bar.pack_propagate(False)
+        self._bar = bar
+        self._grad_items = []
+        bar.bind("<Configure>", lambda e: self._paint_titlebar())
         bar.bind("<Button-1>", self._start_move)
-        bar.bind("<B1-Motion>", self._do_move)
-        bar.bind("<Double-Button-1>", lambda e: self._toggle_max())
+        bar.bind("<Double-Button-1>", self._on_bar_dblclick)
 
-        left = tk.Frame(bar, bg=theme.PRIMARY)
-        left.pack(side="left", padx=(16, 0))
-        for w in (left, bar):
-            w.bind("<Button-1>", self._start_move, add="+")
-            w.bind("<B1-Motion>", self._do_move, add="+")
+        # 品牌区：图标 + 标题 + 副标题（直接画在渐变上，原生通透）
+        x = 16
         if self._icon:
-            tk.Label(left, image=self._icon, bg=theme.PRIMARY).pack(side="left")
-        title = tk.Frame(left, bg=theme.PRIMARY)
-        title.pack(side="left", padx=(10, 0))
-        tk.Label(title, text="MCL · 神启动器", bg=theme.PRIMARY, fg="#ffffff",
-                 font=theme.FONT_TITLE).pack(anchor="w")
-        tk.Label(title, text="我的世界 · 启动 / 服务器 / 内网穿透 一站式工具",
-                 bg=theme.PRIMARY, fg="#dbe3ff", font=theme.FONT_SMALL).pack(anchor="w")
-        title.bind("<Button-1>", self._start_move, add="+")
-        title.bind("<B1-Motion>", self._do_move, add="+")
+            bar.create_image(x, self._BAR_H // 2, image=self._icon, anchor="w",
+                             tags="brand")
+            x += 42
+        bar.create_text(x, 22, text="NCL 启动器", anchor="w", fill="#ffffff",
+                        font=theme.FONT_TITLE, tags="brand")
+        bar.create_text(x, 44, text="我的世界 · 启动 / 服务器 / 内网穿透 一站式工具",
+                        anchor="w", fill="#dfe4ff", font=theme.FONT_SMALL, tags="brand")
+        bar.tag_bind("brand", "<Button-1>", self._start_move)
+        bar.tag_bind("brand", "<Double-Button-1>", self._on_bar_dblclick)
 
-        right = tk.Frame(bar, bg=theme.PRIMARY)
-        right.pack(side="right", padx=(0, 6))
-        self._add_win_btn(right, "—", "最小化", self._minimize, hover="#4259c9")
-        self._add_win_btn(right, "▢", "最大化 / 还原", self._toggle_max, hover="#4259c9")
-        self._add_win_btn(right, "✕", "关闭", self._on_close, hover="#e03131")
+        # 右侧窗口按钮：矩形热区 + 符号，悬停高亮
+        self._win_btns = []  # (rect_id, text_id, kind)
+        for kind, symbol, tip in (("min", "—", "最小化"),
+                                  ("max", "▢", "最大化 / 还原"),
+                                  ("close", "✕", "关闭")):
+            r = bar.create_rectangle(0, 0, 0, 0, fill="", outline="",
+                                     tags=("winbtn", f"btn_{kind}"))
+            t = bar.create_text(0, 0, text=symbol, fill="#ffffff",
+                                font=("Segoe UI Symbol", 13),
+                                tags=("winbtn", f"btn_{kind}"))
+            bar.tag_bind(f"btn_{kind}", "<Enter>",
+                         lambda e, k=kind: self._btn_hover(k, True))
+            bar.tag_bind(f"btn_{kind}", "<Leave>",
+                         lambda e, k=kind: self._btn_hover(k, False))
+            bar.tag_bind(f"btn_{kind}", "<ButtonPress-1>",
+                         lambda e, k=kind: self._btn_click(k))
+            self._win_btns.append((r, t, kind))
 
-    def _add_win_btn(self, parent, text, tip, action, hover):
-        b = tk.Label(parent, text=text, bg=theme.PRIMARY, fg="#ffffff",
-                     font=("Segoe UI Symbol", 14), padx=13, pady=14, cursor="hand2")
-        b.pack(side="left")
-        b.bind("<Enter>", lambda e: b.configure(bg=hover))
-        b.bind("<Leave>", lambda e: b.configure(bg=theme.PRIMARY))
-        b.bind("<ButtonPress-1>", lambda e: action())
-        widgets_tooltip(b, tip)
-        return b
+    def _paint_titlebar(self):
+        """宽度变化时重绘水平渐变，并重新布局右侧按钮。"""
+        bar = self._bar
+        w = max(bar.winfo_width(), 2)
+        h = self._BAR_H
+        bar.delete("grad")
+        steps = max(w // 3, 1)
+        sw = w / steps
+        for i in range(steps):
+            color = theme.lerp_color(theme.GRADIENT_FROM, theme.GRADIENT_TO,
+                                     i / max(steps - 1, 1))
+            bar.create_rectangle(int(i * sw), 0, int((i + 1) * sw) + 1, h,
+                                 fill=color, outline=color, tags="grad")
+        bar.tag_lower("grad")
+        # 右侧按钮布局
+        for i, (r, t, _kind) in enumerate(self._win_btns):
+            x1 = w - (len(self._win_btns) - i) * self._BTN_W
+            bar.coords(r, x1, 0, x1 + self._BTN_W, h)
+            bar.coords(t, x1 + self._BTN_W / 2, h / 2)
+
+    def _btn_hover(self, kind: str, on: bool):
+        for r, _t, k in self._win_btns:
+            if k != kind:
+                continue
+            if not on:
+                self._bar.itemconfigure(r, fill="", stipple="")
+            elif kind == "close":
+                self._bar.itemconfigure(r, fill=theme.DANGER, stipple="")
+            else:
+                # 白色 25% 点刻 = 轻量半透明悬停感
+                self._bar.itemconfigure(r, fill="#ffffff", stipple="gray25")
+
+    def _btn_click(self, kind: str):
+        {"min": self._minimize, "max": self._toggle_max,
+         "close": self._on_close}[kind]()
+
+    def _on_bar_dblclick(self, e):
+        if self._over_winbtn():
+            return
+        self._toggle_max()
+
+    def _over_winbtn(self) -> bool:
+        """当前指针是否落在窗口按钮上（避免按钮点击触发拖动/双击最大化）。"""
+        try:
+            cur = self._bar.find_withtag("current")
+            return bool(cur) and "winbtn" in self._bar.gettags(cur[0])
+        except Exception:
+            return False
 
     # ---------- 内容区 ----------
     def _build_notebook(self):
         nb = ttk.Notebook(self.root)
-        nb.pack(fill="both", expand=True, padx=14, pady=(10, 0))
         self.launcher = LauncherTab(nb)
         self.versions = VersionTab(nb)
         self.download = DownloadCenterTab(nb)
@@ -221,6 +275,11 @@ class MainWindow:
         nb.select(index)
         nb.bind("<<NotebookTabChanged>>", lambda e: self._on_tab(nb, nb.index("current")))
         self._nb = nb
+        # 顶部导航按钮（选中态颜色渐变 + 指示条滑动）—— 必须先于 notebook pack，
+        # 否则会被 expand 的 notebook 挤出可视区
+        self._nav = navbar.NavTabs(self.root, nb)
+        self._nav.pack(fill="x", padx=14, pady=(8, 4))
+        nb.pack(fill="both", expand=True, padx=14)
 
     def _build_status(self):
         bar = tk.Frame(self.root, bg="#ffffff", height=30, highlightbackground=theme.BORDER,
@@ -234,7 +293,7 @@ class MainWindow:
                  bg="#ffffff", fg=theme.MUTED, font=theme.FONT_SMALL).pack(side="right", padx=14)
 
     def _build_resize_grip(self):
-        grip = tk.Frame(self.root, bg="#e3e6ee", cursor="bottom_right_corner", width=18, height=18)
+        grip = tk.Frame(self.root, bg="#d9dee9", cursor="bottom_right_corner", width=18, height=18)
         grip.place(relx=1.0, rely=1.0, anchor="se")
         grip.bind("<ButtonPress-1>", self._start_resize)
         grip.bind("<B1-Motion>", self._do_resize)
@@ -243,6 +302,8 @@ class MainWindow:
     def _start_move(self, e):
         """系统原生拖动：发 WM_NCLBUTTONDOWN + HTCAPTION 让系统接管移动，
         避免无边框窗口用 geometry 手动移动导致整窗重绘、闪烁花屏。"""
+        if self._over_winbtn():
+            return
         try:
             import ctypes.wintypes as wt
             user32 = ctypes.windll.user32

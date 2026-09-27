@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .. import config, java, launch, paths, versions
-from . import bus, widgets
+from . import bus, theme, widgets
 
 
 class LauncherTab(ttk.Frame):
@@ -27,10 +27,16 @@ class LauncherTab(ttk.Frame):
         # 左：已下载版本列表
         left = ttk.LabelFrame(main, text=" 已下载版本 ")
         left.pack(side="left", fill="y", padx=(0, 8))
-        self.ver_list = tk.Listbox(left, width=24, height=16, activestyle="dotbox",
+        self.ver_list = tk.Listbox(left, width=24, height=16, activestyle="none",
                                    selectmode="browse",
                                    font=("Microsoft YaHei UI", 10),
-                                   highlightbackground="#ccd3e6", bd=1, relief="solid")
+                                   bg="#ffffff", fg=theme.TEXT,
+                                   selectbackground=theme.PRIMARY,
+                                   selectforeground="#ffffff",
+                                   highlightthickness=1,
+                                   highlightbackground=theme.BORDER,
+                                   highlightcolor=theme.PRIMARY,
+                                   bd=0, relief="flat")
         self.ver_list.pack(fill="both", expand=True, padx=6, pady=6)
         sb = ttk.Scrollbar(left, command=self.ver_list.yview)
         self.ver_list.configure(yscrollcommand=sb.set)
@@ -46,12 +52,17 @@ class LauncherTab(ttk.Frame):
 
         ops = ttk.Frame(right)
         ops.pack(fill="x")
-        self.launch_btn = ttk.Button(ops, text="启动游戏", command=self.launch_game)
+        self.launch_btn = ttk.Button(ops, text="▶ 启动游戏", style="Accent.TButton",
+                                     command=self.launch_game)
         self.launch_btn.pack(side="left", padx=2)
-        self.stop_btn = ttk.Button(ops, text="停止", command=self.stop_game)
-        self.stop_btn.pack(side="left", padx=2)
+        self.stop_btn = ttk.Button(ops, text="■ 停止", style="Danger.TButton",
+                                   command=self.stop_game)
+        self.stop_btn.pack(side="left", padx=6)
         self.open_btn = ttk.Button(ops, text="打开目录", command=self.open_game_dir)
         self.open_btn.pack(side="left", padx=2)
+        widgets.ToolTip(self.launch_btn, "下载缺失资源并启动选中的游戏版本")
+        widgets.ToolTip(self.stop_btn, "强制结束游戏进程")
+        widgets.ToolTip(self.open_btn, "打开该版本的游戏目录（存档/模组）")
 
         acc = ttk.Frame(right)
         acc.pack(fill="x", pady=(6, 0))
@@ -68,7 +79,8 @@ class LauncherTab(ttk.Frame):
         self.progress = widgets.make_progress(right)
         self.progress.pack(fill="x", pady=(6, 0))
         self.status_var = tk.StringVar(value="就绪")
-        ttk.Label(right, textvariable=self.status_var).pack(anchor="w", pady=(2, 0))
+        ttk.Label(right, textvariable=self.status_var, style="Muted.TLabel").pack(
+            anchor="w", pady=(2, 0))
 
     def _build_console(self):
         con = ttk.LabelFrame(self._right, text="游戏控制台")
@@ -163,7 +175,7 @@ class LauncherTab(ttk.Frame):
 
     def _do_launch(self, vid):
         try:
-            self.console.append(f"[MCL] 正在准备启动 {vid} …")
+            self.console.append(f"[NCL] 正在准备启动 {vid} …")
 
             # 先检查 Java 是否满足版本要求
             try:
@@ -178,7 +190,7 @@ class LauncherTab(ttk.Frame):
                        f"（{best or '未找到'}）。\n\n"
                        f"请安装 Java {required} 或更高版本，"
                        f"或在「下载中心」选择更低的 MC 版本（如 1.16.5 需要 Java 17）。")
-                self.console.append("[MCL] 中止启动：Java 版本不足，未开始下载")
+                self.console.append("[NCL] 中止启动：Java 版本不足，未开始下载")
                 bus.dispatch(lambda: messagebox.showerror("启动失败", msg))
                 return
 
@@ -196,10 +208,10 @@ class LauncherTab(ttk.Frame):
             except Exception as e:
                 bus.dispatch(lambda: messagebox.showerror("启动失败", str(e)))
                 return
-            self.console.append("[MCL] 资源就绪，拉起游戏进程…")
+            self.console.append("[NCL] 资源就绪，拉起游戏进程…")
             self.game = launch.GameProcess(cmd, self.console.append,
                                            on_exit=lambda c: self.console.append(
-                                               f"[MCL] 游戏已退出 (code {c})"))
+                                               f"[NCL] 游戏已退出 (code {c})"))
             try:
                 self.game.start()
             except Exception as e:

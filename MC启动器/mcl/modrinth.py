@@ -39,7 +39,7 @@ def _get(url: str, params: Optional[dict] = None):
     if params:
         url += "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={
-        "User-Agent": "MCL-ShenLauncher/1.0 (mod download center)"})
+        "User-Agent": "NCL/1.0 (mod download center)"})
     import time
     last: Optional[Exception] = None
     for attempt in range(3):
