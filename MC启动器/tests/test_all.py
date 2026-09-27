@@ -124,6 +124,43 @@ def test_bootstrap():
         check("版本游戏目录自动创建", os.path.isdir(gd), gd)
         check("游戏目录位于 .minecraft 下",
               os.path.abspath(os.path.dirname(gd)) == os.path.abspath(mc))
+        # 首次运行静默自举：不弹任何提示框
+        import mcl.ui as ui_mod
+
+        class _FakeWin:
+            status = None
+            selected = None
+
+            def select_tab(self, i):
+                self.selected = i
+
+        calls = []
+
+        class _MB:
+            showinfo = staticmethod(lambda *a, **k: calls.append("info"))
+            showwarning = staticmethod(lambda *a, **k: calls.append("warn"))
+            showerror = staticmethod(lambda *a, **k: calls.append("err"))
+
+        had_mb = hasattr(ui_mod, "messagebox")
+        orig_mb = getattr(ui_mod, "messagebox", None)
+        ui_mod.messagebox = _MB
+        try:
+            marker = os.path.join(d, ".initialized")
+            if os.path.exists(marker):
+                os.remove(marker)
+            w = _FakeWin()
+            ui_mod._first_run_guide(w, paths.ensure_layout())
+            check("首次运行不弹提示框", not calls, str(calls))
+            check("首次运行引导跳到下载中心", w.selected == 2, str(w.selected))
+            check("首次运行已打初始化标记", os.path.isfile(marker))
+        finally:
+            if had_mb:
+                ui_mod.messagebox = orig_mb
+            else:
+                try:
+                    del ui_mod.messagebox
+                except Exception:
+                    pass
     finally:
         if old_env is None:
             os.environ.pop("NCL_DATA_DIR", None)
