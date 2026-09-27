@@ -16,6 +16,15 @@
 - exe 放在受保护目录（如 `C:\Program Files`）写不进时，自动回退到 `%LOCALAPPDATA%\NCL-Launcher`
 - 不再提供 zip 免安装包：exe 本身就是绿色版，解压步骤都省了，下载体积也更小
 
+### 🗂 版本详情
+
+- 版本管理页**双击任一版本**（或选中后点「查看详情」）进入详情窗口，四个子页：
+  - **模组**：启用/禁用状态一目了然，可一键切换（`.jar` ↔ `.jar.disabled`）、打开文件夹、删除
+  - **存档**：解析 `level.dat` 显示**世界名 / 游戏模式 / MC 版本 / 最后游玩时间**，按游玩时间排序
+  - **资源包**：ZIP 与文件夹材质包统一列出
+  - **数据包**：全局 datapacks + 各存档内的 datapacks 汇总，标明所属范围
+- 目录扫描在后台线程执行，大存档目录也不卡界面；列表空时给出去哪里下载的引导文案
+
 ### 🔐 正版登录（Microsoft）
 
 - 新增 `mcl/accounts.py`：Microsoft OAuth 设备码登录（XBL → XSTS → Minecraft）、Yggdrasil 外置登录、离线账户三合一；refresh_token 落盘，令牌约 24 小时过期自动续期
