@@ -18,13 +18,41 @@ class VersionInfo:
     time: str = ""
 
 
-def fetch_version_manifest() -> list[VersionInfo]:
-    """获取版本清单（release + snapshot）。"""
-    data = network.http_json(network.resolve_version_json(""))
-    out = []
+def fetch_version_manifest(retries: int = 3) -> list[VersionInfo]:
+    """获取版本清单（release + snapshot）。
+
+    失败自动重试（清单较大，弱网下容易超时），并按 id 去重——
+    镜像偶发返回重复 id，若不去重，UI 侧 insert 会因 iid 冲突中断，
+    导致列表「加载到一半就停了」。
+    """
+    data = None
+    last: Optional[Exception] = None
+    for _ in range(max(1, retries)):
+        try:
+            data = network.http_json(network.resolve_version_json(""), timeout=30)
+            break
+        except network.DownloadError as e:
+            last = e
+        except Exception as e:
+            # 兜底：超时/JSON 解析失败等一律转成 DownloadError，
+            # 否则上层 catch DownloadError 会漏掉，UI 卡在「正在拉取…」。
+            last = network.DownloadError(str(e))
+    if data is None:
+        raise network.DownloadError(f"获取版本清单失败: {last}")
+
+    out: list[VersionInfo] = []
+    seen: set[str] = set()
     for v in data.get("versions", []):
-        out.append(VersionInfo(id=v["id"], type=v.get("type", "release"),
-                               url=v.get("url", ""), time=v.get("time", "")))
+        vid = v.get("id")
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        # 注意：清单里 `time` 是镜像刷新版本 JSON 的时间（会批量变动），
+        # 排序/展示必须用 `releaseTime`（真实发布日期），否则旧版本会被
+        # 顶到列表最前面，看起来像「主要版本丢失」。
+        out.append(VersionInfo(id=vid, type=v.get("type", "release"),
+                               url=v.get("url", ""),
+                               time=v.get("releaseTime") or v.get("time", "")))
     out.sort(key=lambda x: x.time, reverse=True)
     return out
 

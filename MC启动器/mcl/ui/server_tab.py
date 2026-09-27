@@ -41,11 +41,17 @@ class ServerTab(ttk.Frame):
     def _load_versions(self):
         try:
             man = versions.fetch_version_manifest()
-        except network.DownloadError:
+        except network.DownloadError as e:
+            # 之前失败时静默 return，下拉框一直是空的，用户以为「列表加载不全」。
+            bus.dispatch(lambda e=e: self.create_status.configure(
+                text=f"MC 版本列表加载失败：{e}（点「刷新」可重试）"))
             return
-        ids = [v.id for v in man if v.type in ("release", "snapshot")][:40]
+        # 不做条数截断：旧版本（如 1.12.2、1.7.10）同样能开服，砍掉会让用户找不到版本。
+        # alpha/beta 不开服，直接过滤掉。
+        ids = [v.id for v in man if v.type in ("release", "snapshot")]
+        latest_release = next((v.id for v in man if v.type == "release"), ids[0] if ids else "")
         bus.dispatch(lambda: self.sver.configure(values=ids) or (
-            self.sver.set(ids[0]) if ids else None))
+            self.sver.set(latest_release) if ids else None))
 
     def _build_control(self):
         f = ttk.LabelFrame(self, text="运行控制")
@@ -155,7 +161,7 @@ class ServerTab(ttk.Frame):
                 bus.dispatch(lambda: (self.create_status.configure(text="创建完成"),
                                       self.refresh_list()))
             except Exception as e:
-                bus.dispatch(lambda: self.create_status.configure(text=f"创建失败: {e}"))
+                bus.dispatch(lambda e=e: self.create_status.configure(text=f"创建失败: {e}"))
 
         bus.run_async(do, "create-server")
 
@@ -249,7 +255,7 @@ class ServerTab(ttk.Frame):
             bus.dispatch(lambda: (self.console.append(f"[NCL] 备份完成: {dest}"),
                                   self.refresh_backups()))
         except Exception as e:
-            bus.dispatch(lambda: messagebox.showerror("备份失败", str(e)))
+            bus.dispatch(lambda e=e: messagebox.showerror("备份失败", str(e)))
 
     def refresh_backups(self):
         name = self._selected()

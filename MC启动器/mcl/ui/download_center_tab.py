@@ -87,7 +87,7 @@ class GameDownloadPane(ttk.Frame):
         try:
             man = versions.fetch_version_manifest()
         except network.DownloadError as e:
-            bus.dispatch(lambda: (self.status_var.set(f"刷新失败: {e}"),
+            bus.dispatch(lambda e=e: (self.status_var.set(f"刷新失败: {e}"),
                                   messagebox.showerror("刷新失败", str(e))))
             return
         self._man = man
@@ -95,15 +95,26 @@ class GameDownloadPane(ttk.Frame):
 
     def _fill(self, man):
         self.tree.delete(*self.tree.get_children())
-        for v in man:
+        n = 0
+        for i, v in enumerate(man):
             t = "正式版" if v.type == "release" else "快照"
-            self.tree.insert("", "end", iid=v.id,
-                             values=(v.id, t, v.time[:10] if v.time else ""))
-        self.status_var.set(f"共 {len(man)} 个版本")
+            # iid 用序号而非版本 id：版本 id 可能重复或含特殊字符，
+            # 会导致 TclError 中断整列，表现为「列表只加载了一部分」。
+            try:
+                self.tree.insert("", "end", iid=f"ver-{i}",
+                                 values=(v.id, t, v.time[:10] if v.time else ""))
+                n += 1
+            except Exception:
+                continue
+        self.status_var.set(f"共 {n} 个版本" + ("" if n == len(man) else f"（已跳过 {len(man) - n} 条异常数据）"))
 
     def _selected_version(self) -> str | None:
         sel = self.tree.selection()
-        return sel[0] if sel else None
+        if not sel:
+            return None
+        # 行 iid 是 ver-<序号>，真正的版本 id 在第一列
+        vals = self.tree.item(sel[0], "values")
+        return vals[0] if vals else None
 
     def download(self):
         vid = self._selected_version()
@@ -122,9 +133,9 @@ class GameDownloadPane(ttk.Frame):
             bus.dispatch(lambda: (self.status_var.set(f"{vid} 下载完成，可去「启动器」页启动"),
                                   widgets.set_progress(self.progress, 1, 1)))
         except network.DownloadError as e:
-            bus.dispatch(lambda: messagebox.showerror("下载失败", str(e)))
+            bus.dispatch(lambda e=e: messagebox.showerror("下载失败", str(e)))
         except Exception as e:
-            bus.dispatch(lambda: messagebox.showerror("下载失败", f"{e}"))
+            bus.dispatch(lambda e=e: messagebox.showerror("下载失败", f"{e}"))
 
     def open_dir(self):
         vid = self._selected_version()
@@ -313,7 +324,7 @@ class ModDownloadPane(ttk.Frame):
             results = modrinth.search_projects(real_q, ptype=ptype, version=version,
                                                loader=loader, limit=40)
         except modrinth.ModrinthError as e:
-            bus.dispatch(lambda: messagebox.showerror("搜索失败", str(e)))
+            bus.dispatch(lambda e=e: messagebox.showerror("搜索失败", str(e)))
             return
         bus.dispatch(lambda: self._fill_results(results, real_q, ptype, note))
 
@@ -381,7 +392,7 @@ class ModDownloadPane(ttk.Frame):
         try:
             vers = modrinth.get_versions(pid, version=version, loader=loader)
         except modrinth.ModrinthError as e:
-            bus.dispatch(lambda: messagebox.showerror("获取版本失败", str(e)))
+            bus.dispatch(lambda e=e: messagebox.showerror("获取版本失败", str(e)))
             return
         if not vers:
             bus.dispatch(lambda: messagebox.showinfo(
@@ -400,13 +411,13 @@ class ModDownloadPane(ttk.Frame):
             try:
                 os.makedirs(d, exist_ok=True)
             except Exception as e:
-                bus.dispatch(lambda: messagebox.showerror("路径错误", str(e)))
+                bus.dispatch(lambda e=e: messagebox.showerror("路径错误", str(e)))
                 return
         else:
             try:
                 d, desc = modrinth.install_target_dir("client", "", ptype, version)
             except Exception as e:
-                bus.dispatch(lambda: messagebox.showerror("路径错误", str(e)))
+                bus.dispatch(lambda e=e: messagebox.showerror("路径错误", str(e)))
                 return
         self._install_dir = d
         bus.dispatch(lambda: self._status(f"正在下载 {f['filename']} → {desc}…",
@@ -420,7 +431,7 @@ class ModDownloadPane(ttk.Frame):
                     f"安装完成: {f['filename']} → {desc}"),
                     widgets.set_progress(self.progress, 1, 1)))
             except modrinth.ModrinthError as e:
-                bus.dispatch(lambda: messagebox.showerror("下载失败", str(e)))
+                bus.dispatch(lambda e=e: messagebox.showerror("下载失败", str(e)))
 
         bus.run_async(done, "dl-download")
 
@@ -701,7 +712,7 @@ class ModDetailWindow(tk.Toplevel):
         try:
             vers = modrinth.get_versions(pid)
         except Exception as e:
-            bus.dispatch(lambda: self._show_versions_error(str(e)))
+            bus.dispatch(lambda e=e: self._show_versions_error(str(e)))
             return
         vers.sort(key=lambda v: v.get("date", "") or "", reverse=True)
         if self._version:
@@ -730,7 +741,7 @@ class ModDetailWindow(tk.Toplevel):
                     seen.add(vn)
                     self.gv_list.insert("end", f"    {vn}")
         self.up_tree.delete(*self.up_tree.get_children())
-        for v in (cur_rows if cur_rows else all_rows)[:60]:
+        for v in (cur_rows if cur_rows else all_rows):
             self.up_tree.insert("", "end", values=(
                 v.get("version_number", ""),
                 (v.get("date", "") or "")[:10],

@@ -13,9 +13,13 @@ DEFAULTS = {
     "java_path": "",            # 留空则自动检测
     "jvm_args": "-Xmx4G -Xms1G",
     "user_name": "Steve",
-    "auth_mode": "offline",     # offline / yggdrasil
+    "auth_mode": "offline",     # offline / yggdrasil / microsoft（兼容旧配置）
     "access_token": "",
     "uuid": "",
+    # 账户（详见 mcl/accounts.py）：留空则用内置默认客户端 ID
+    "ms_client_id": "",
+    "ygg_url": "",              # 外置登录/皮肤站地址，如 https://skin.example.com/api/yggdrasil
+    "ygg_client_token": "",
     "width": 854,
     "height": 480,
     "mirror": "auto",           # auto / mojang / bmclapi
@@ -47,7 +51,8 @@ def load() -> dict:
             return _cfg
         data = {}
         p = _file()
-        if os.path.exists(p):
+        existed = os.path.exists(p)
+        if existed:
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -58,6 +63,8 @@ def load() -> dict:
         if not merged.get("uuid"):
             merged["uuid"] = str(uuid.uuid4())
         _cfg = merged
+        if not existed:
+            save()  # 首次运行：立即落盘一份默认配置
         return _cfg
 
 
@@ -65,6 +72,7 @@ def save() -> None:
     with _lock:
         p = _file()
         try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(_cfg, f, ensure_ascii=False, indent=2)
         except Exception:

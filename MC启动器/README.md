@@ -27,11 +27,9 @@
 
 ### 方式 A：免安装绿色版（推荐，浏览者直接可用）
 
-从右侧 **Releases** 下载 `NCL-portable-v1.1.zip`，解压后双击 `NCL.exe` 即可。
+从右侧 **Releases** 下载 `NCL-免安装版.zip`，解压后双击 `NCL.exe` 即可。
 
 首次使用请到「设置」页点「**自动检测**」定位 Java（或手动浏览选择 `java.exe`）。
-
-另外 Release 里还提供 `NCL-source-v1.1.zip`（源码打包，无需 Python 环境，含 `tests/` 与构建配置）。
 
 ### 方式 B：源码运行
 

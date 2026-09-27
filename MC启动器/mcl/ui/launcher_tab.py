@@ -5,7 +5,7 @@ import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from .. import config, java, launch, paths, versions
+from .. import accounts, config, java, launch, paths, versions
 from . import bus, theme, widgets
 
 
@@ -16,6 +16,7 @@ class LauncherTab(ttk.Frame):
 
         self._build_top()
         self._build_console()
+        self._sync_account()
         # 初始显示本地已下载版本
         self._do_refresh()
 
@@ -64,17 +65,37 @@ class LauncherTab(ttk.Frame):
         widgets.ToolTip(self.stop_btn, "强制结束游戏进程")
         widgets.ToolTip(self.open_btn, "打开该版本的游戏目录（存档/模组）")
 
-        acc = ttk.Frame(right)
-        acc.pack(fill="x", pady=(6, 0))
-        ttk.Label(acc, text="游戏名:").pack(side="left")
+        # 第一行：游戏名 + JVM + Java
+        row1 = ttk.Frame(right)
+        row1.pack(fill="x", pady=(6, 0))
+        ttk.Label(row1, text="游戏名:").pack(side="left")
         self.name_var = tk.StringVar(value=config.get("user_name", "Steve"))
-        ttk.Entry(acc, textvariable=self.name_var, width=16).pack(side="left", padx=4)
-        ttk.Label(acc, text="JVM:").pack(side="left")
-        self.jvm_label = ttk.Label(acc, text=config.get("jvm_args", ""))
+        self.name_entry = ttk.Entry(row1, textvariable=self.name_var, width=16)
+        self.name_entry.pack(side="left", padx=4)
+        ttk.Label(row1, text="JVM:").pack(side="left")
+        self.jvm_label = ttk.Label(row1, text=config.get("jvm_args", ""))
         self.jvm_label.pack(side="left", padx=4)
-        ttk.Label(acc, text="Java:").pack(side="left")
-        self.java_label = ttk.Label(acc, text=self._java_desc())
+        ttk.Label(row1, text="Java:").pack(side="left")
+        self.java_label = ttk.Label(row1, text=self._java_desc())
         self.java_label.pack(side="left", padx=4)
+
+        # 第二行：账户区（独立一行，正版登录入口一眼可见，不与上面的信息抢宽度）
+        acc = ttk.LabelFrame(right, text=" 账户 ")
+        acc.pack(fill="x", pady=(8, 0))
+        ttk.Label(acc, text="当前:").pack(side="left", padx=(6, 0), pady=6)
+        self.acc_var = tk.StringVar(value=accounts.active_label())
+        self.acc_label = tk.Label(acc, textvariable=self.acc_var,
+                                  fg=theme.PRIMARY, bg=theme.CARD,
+                                  font=("Microsoft YaHei UI", 9, "bold"))
+        self.acc_label.pack(side="left", padx=(2, 10), pady=6)
+        self.msa_btn = ttk.Button(acc, text="正版登录 (Microsoft)",
+                                  style="Accent.TButton",
+                                  command=lambda: self.open_accounts("msa"))
+        self.msa_btn.pack(side="left", pady=6)
+        ttk.Button(acc, text="账户管理", command=self.open_accounts).pack(
+            side="left", padx=6, pady=6)
+        ttk.Button(acc, text="退出登录", command=self.logout_account).pack(
+            side="right", padx=8, pady=6)
 
         self.progress = widgets.make_progress(right)
         self.progress.pack(fill="x", pady=(6, 0))
@@ -95,6 +116,30 @@ class LauncherTab(ttk.Frame):
             return "未设置"
         maj = java.java_major(jp)
         return f"{os.path.basename(jp)} (Java {maj})"
+
+    # ---- 账户 ----
+    def open_accounts(self, tab=None):
+        """tab=None 打开完整管理；传 "msa" 直达正版登录页。"""
+        from .account import AccountDialog
+        AccountDialog(self.winfo_toplevel(), on_changed=self._sync_account,
+                      initial_tab=tab)
+
+    def logout_account(self):
+        accounts.logout()
+        self._sync_account()
+
+    def _sync_account(self):
+        """把界面同步到当前账户：登录态下游戏名只读。"""
+        a = accounts.active()
+        self.acc_var.set(accounts.active_label())
+        self.name_var.set(a.name)
+        try:
+            self.name_entry.configure(
+                state="normal" if a.mode == accounts.OFFLINE else "disabled")
+            self.msa_btn.configure(
+                text="重新登录" if a.mode != accounts.OFFLINE else "正版登录 (Microsoft)")
+        except Exception:
+            pass
 
     # ---- 已下载版本 ----
     @staticmethod
@@ -169,13 +214,28 @@ class LauncherTab(ttk.Frame):
         if not vid:
             messagebox.showinfo("提示", "请先选择版本")
             return
-        config.set("user_name", self.name_var.get() or "Steve")
+        # 只有离线模式才允许手动改游戏名
+        if accounts.active().mode == accounts.OFFLINE:
+            config.set("user_name", self.name_var.get() or "Steve")
         self._set_loading(True)
         bus.run_async(lambda: self._do_launch(vid), "launch")
 
     def _do_launch(self, vid):
         try:
             self.console.append(f"[NCL] 正在准备启动 {vid} …")
+
+            # 先确保登录态有效（正版令牌约 24 小时过期，可自动续期）
+            try:
+                acc = accounts.active()
+                if acc.mode != accounts.OFFLINE and acc.expired:
+                    self.console.append("[NCL] 登录令牌已过期，正在自动续期…")
+                    accounts.ensure_valid(acc)
+                    bus.dispatch(self._sync_account)
+                    self.console.append("[NCL] 令牌续期成功")
+            except Exception as e:
+                bus.dispatch(lambda e=e: messagebox.showerror(
+                    "登录已过期", f"{e}\n\n请到「账户管理」里重新登录。"))
+                return
 
             # 先检查 Java 是否满足版本要求
             try:
@@ -201,12 +261,12 @@ class LauncherTab(ttk.Frame):
             try:
                 launch.download_client(vid, progress=prog)
             except Exception as e:
-                bus.dispatch(lambda: messagebox.showerror("启动失败", f"资源下载失败:\n{e}"))
+                bus.dispatch(lambda e=e: messagebox.showerror("启动失败", f"资源下载失败:\n{e}"))
                 return
             try:
                 cmd = launch.build_launch_command(vid)
             except Exception as e:
-                bus.dispatch(lambda: messagebox.showerror("启动失败", str(e)))
+                bus.dispatch(lambda e=e: messagebox.showerror("启动失败", str(e)))
                 return
             self.console.append("[NCL] 资源就绪，拉起游戏进程…")
             self.game = launch.GameProcess(cmd, self.console.append,
@@ -215,7 +275,7 @@ class LauncherTab(ttk.Frame):
             try:
                 self.game.start()
             except Exception as e:
-                bus.dispatch(lambda: messagebox.showerror("启动失败", str(e)))
+                bus.dispatch(lambda e=e: messagebox.showerror("启动失败", str(e)))
                 return
         finally:
             bus.dispatch(lambda: self._set_loading(False))

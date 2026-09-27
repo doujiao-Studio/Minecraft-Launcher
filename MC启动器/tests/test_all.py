@@ -84,6 +84,55 @@ def test_config_paths():
 
 
 # ==================================================================
+#  1b. 首次运行自举（单 exe 双击即用）
+# ==================================================================
+def test_bootstrap():
+    group("首次运行自举")
+    d = tempfile.mkdtemp(prefix="mcl-boot-")
+    old_env = os.environ.get("NCL_DATA_DIR")
+    os.environ["NCL_DATA_DIR"] = d
+    try:
+        info = paths.ensure_layout()
+        check("ensure_layout 返回数据根目录",
+              os.path.abspath(info["root"]) == os.path.abspath(d), info["root"])
+        check("NCLData 子目录齐全",
+              all(os.path.isdir(os.path.join(d, s))
+                  for s in ("versions", "servers", "relay", "logs", "cache")))
+        mc = info["minecraft"]
+        check(".minecraft 已自动创建", os.path.isdir(mc), mc)
+        check(".minecraft 子目录齐全",
+              all(os.path.isdir(os.path.join(mc, s))
+                  for s in ("saves", "mods", "resourcepacks", "shaderpacks",
+                            "screenshots", "config")))
+        check("首次运行标记为 True", paths.is_first_run() is True)
+        paths.mark_initialized()
+        check("打标记后不再是首次运行", paths.is_first_run() is False)
+        again = paths.ensure_layout()
+        check("重复自举不报错且不重建", again["created"] == [], str(again["created"][:3]))
+        # 空目录下配置也能落盘（save 自带 makedirs）
+        cfg = os.path.join(d, "config.json")
+        if os.path.exists(cfg):
+            os.remove(cfg)
+        config.save()
+        check("首次运行生成 config.json", os.path.isfile(cfg), cfg)
+        with open(cfg, "r", encoding="utf-8") as f:
+            j = json.load(f)
+        check("config.json 含默认键", "jvm_args" in j and "uuid" in j)
+        check("config.json 含离线 uuid", bool(j.get("uuid")))
+        # 游戏目录（版本级）也能自动铺开
+        gd = paths.game_dir("1.21.1")
+        check("版本游戏目录自动创建", os.path.isdir(gd), gd)
+        check("游戏目录位于 .minecraft 下",
+              os.path.abspath(os.path.dirname(gd)) == os.path.abspath(mc))
+    finally:
+        if old_env is None:
+            os.environ.pop("NCL_DATA_DIR", None)
+        else:
+            os.environ["NCL_DATA_DIR"] = old_env
+        shutil.rmtree(d, ignore_errors=True)
+
+
+# ==================================================================
 #  2. utils
 # ==================================================================
 def test_utils():
@@ -188,6 +237,74 @@ def test_versions():
     check("规则判定 disallow", not versions._rules_allow(
         [{"action": "disallow", "os": {"name": "windows"}}], "windows"))
     check("空 json 的库列表为空", versions.collect_libraries({}) == [])
+    test_fetch_manifest()
+
+
+def test_fetch_manifest():
+    """版本清单：不得截断、不得因重复 id 丢条目、超时要转成 DownloadError。"""
+    from mcl import network as _net
+
+    def _fake_manifest(n=600):
+        return {"versions": [
+            {"id": f"1.{i}.0", "type": "release",
+             "url": f"https://x/{i}", "time": f"2020-01-{i % 28 + 1:02d}T00:00:00Z"}
+            for i in range(n)]}
+
+    orig = _net.http_json
+    try:
+        # 1) 不截断
+        _net.http_json = lambda *a, **k: _fake_manifest(600)
+        man = versions.fetch_version_manifest()
+        check("版本清单不截断(600)", len(man) == 600, f"实际 {len(man)}")
+        check("清单按时间倒序", man[0].time >= man[-1].time)
+
+        # 2) 重复 id 去重且不中断后续条目
+        def _dup(*a, **k):
+            d = _fake_manifest(50)
+            d["versions"].insert(5, dict(d["versions"][6]))
+            return d
+        _net.http_json = _dup
+        man2 = versions.fetch_version_manifest()
+        check("重复 id 被去重", len(man2) == 50, f"实际 {len(man2)}")
+
+        # 2.5) 排序必须按 releaseTime（发布日期），不能按镜像刷新时间 time
+        def _rt(*a, **k):
+            # time 全部相同（模拟镜像批量刷新），releaseTime 各不相同
+            return {"versions": [
+                {"id": f"v{i}", "type": "release", "url": "u",
+                 "time": "2099-01-01T00:00:00Z",
+                 "releaseTime": f"2020-{i % 12 + 1:02d}-{i % 28 + 1:02d}T00:00:00Z"}
+                for i in range(24)]}
+        _net.http_json = _rt
+        man_rt = versions.fetch_version_manifest()
+        rts = [v.time for v in man_rt]
+        check("清单按发布日期排序(而非镜像刷新时间)",
+              rts == sorted(rts, reverse=True),
+              f"首条 {rts[0][:10]} 末条 {rts[-1][:10]}")
+
+        # 3) 第一次读超时 -> 重试后成功（不再抛裸 TimeoutError）
+        state = {"n": 0}
+
+        def _flaky(*a, **k):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise TimeoutError("read timed out")
+            return _fake_manifest(10)
+        _net.http_json = _flaky
+        man3 = versions.fetch_version_manifest(retries=3)
+        check("读超时后自动重试成功", len(man3) == 10 and state["n"] == 2)
+
+        # 4) 持续超时 -> 抛 DownloadError 而不是裸 TimeoutError
+        _net.http_json = lambda *a, **k: (_ for _ in ()).throw(TimeoutError("t/o"))
+        try:
+            versions.fetch_version_manifest(retries=2)
+            check("持续超时转为 DownloadError", False, "未抛异常")
+        except _net.DownloadError:
+            check("持续超时转为 DownloadError", True)
+        except TimeoutError:
+            check("持续超时转为 DownloadError", False, "仍是裸 TimeoutError")
+    finally:
+        _net.http_json = orig
 
 
 # ==================================================================
@@ -255,6 +372,170 @@ def test_translate():
 # ==================================================================
 #  8. launch
 # ==================================================================
+def test_accounts():
+    group("账户（离线 / 正版 / 外置登录）")
+    from mcl import accounts
+
+    # 1) 离线账户
+    u1 = accounts.offline_uuid("Steve")
+    check("离线 uuid 稳定", u1 == accounts.offline_uuid("Steve"))
+    check("离线 uuid 格式合法", len(u1) == 36 and u1.count("-") == 4)
+    off = accounts.offline_account("Steve")
+    check("离线 access_token 占位", off.access_token == "0")
+
+    # 2) --userType 映射（启动参数正确性）
+    check("正版 userType=msa",
+          accounts.Account(mode=accounts.MICROSOFT).user_type == "msa")
+    check("外置 userType=mojang",
+          accounts.Account(mode=accounts.YGGDRASIL).user_type == "mojang")
+    check("离线 userType=legacy", off.user_type == "legacy")
+
+    # 3) 过期判定（提前 5 分钟视为过期）
+    check("已过期判定", accounts.Account(expires_at=time.time() - 1).expired)
+    check("未过期判定", not accounts.Account(expires_at=time.time() + 3600).expired)
+    check("无过期时间的账户永不过期", not accounts.Account().expired)
+    check("过期且无 refresh_token → 需重新登录",
+          accounts.Account(mode=accounts.MICROSOFT, expires_at=1).needs_relogin)
+
+    # 4) 外置登录解析（mock 掉网络）
+    orig_http = accounts._http
+    calls = {"n": 0}
+
+    def fake_ygg(url, *a, **k):
+        calls["n"] += 1
+        return {"accessToken": "AT-1", "clientToken": "CT-1",
+                "selectedProfile": {"id": "uuid-skin", "name": "SkinUser"},
+                "availableProfiles": [{"id": "uuid-skin", "name": "SkinUser"}]}
+    try:
+        accounts._http = fake_ygg
+        payload, profiles = accounts.ygg_authenticate("skin.example.com/api/yggdrasil",
+                                                      "u", "p")
+        check("外置登录返回令牌", payload.get("accessToken") == "AT-1")
+        acc = accounts.ygg_account("skin.example.com/api/yggdrasil", payload, profiles[0])
+        check("外置账户解析正确", acc.name == "SkinUser" and acc.uuid == "uuid-skin")
+        check("外置地址被规范化", acc.ygg_url.startswith("https://"))
+
+        # 5) 外置续期
+        def fake_refresh(url, *a, **k):
+            return {"accessToken": "AT-2", "clientToken": "CT-1"}
+        accounts._http = fake_refresh
+        acc2 = accounts.ygg_refresh(acc)
+        check("外置登录续期换新令牌", acc2.access_token == "AT-2")
+
+        # 6) 微软兑换链路（XBL → XSTS → MC → profile）
+        seq = []
+
+        def fake_ms(url, *a, **k):
+            seq.append(url)
+            body = None
+            if k.get("json_body") is not None:
+                body = k["json_body"]
+            if "user.auth.xboxlive.com" in url:
+                return {"Token": "XBL", "DisplayClaims": {"xui": [{"uhs": "UHS"}]}}
+            if "xsts.auth.xboxlive.com" in url:
+                return {"Token": "XSTS", "DisplayClaims": {"xui": [{"uhs": "UHS"}]}}
+            if "launcher/login" in url:
+                return {"access_token": "MC-TOKEN", "expires_in": 86400}
+            if "minecraft/profile" in url:
+                return {"id": "mc-uuid", "name": "RealPlayer"}
+            return {}
+        accounts._http = fake_ms
+        msa = accounts.msa_finish({"access_token": "MS-TOKEN", "refresh_token": "RT"})
+        check("微软兑换拿到 MC 令牌", msa.access_token == "MC-TOKEN")
+        check("微软账户角色名正确", msa.name == "RealPlayer" and msa.uuid == "mc-uuid")
+        check("微软令牌记录了过期时间", msa.expires_at > time.time())
+        check("兑换链路顺序正确",
+              any("xsts" in u for u in seq) and seq.index(
+                  [u for u in seq if "xsts" in u][0]) >
+              seq.index([u for u in seq if "user.auth" in u][0]))
+
+        # 6b) 回归：XSTS 的 RelyingParty 必须是 rp:// 形式（写成 https:// 会被 Xbox 拒绝）
+        seen_rp = {}
+
+        def fake_rp(url, *a, **k):
+            body = k.get("json_body")
+            if "xsts.auth.xboxlive.com" in url and isinstance(body, dict):
+                seen_rp["rp"] = (body.get("Properties") or {}).get("RelyingParty") \
+                    or body.get("RelyingParty")
+            if "user.auth.xboxlive.com" in url:
+                return {"Token": "X", "DisplayClaims": {"xui": [{"uhs": "U"}]}}
+            if "xsts.auth.xboxlive.com" in url:
+                return {"Token": "S", "DisplayClaims": {"xui": [{"uhs": "U"}]}}
+            if "login_with_xbox" in url or "launcher/login" in url:
+                return {"access_token": "MC", "expires_in": 86400}
+            return {}
+        accounts._http = fake_rp
+        accounts.msa_finish({"access_token": "MS", "refresh_token": "R"})
+        check("XSTS RelyingParty 用 rp:// 形式",
+              str(seen_rp.get("rp", "")).startswith("rp://"),
+              f"实际 {seen_rp.get('rp')}")
+
+        # 6c) 回归：Minecraft 登录端点与字段名必须成对，schema 报错时自动换组合
+        combos = []
+
+        def fake_combo(url, *a, **k):
+            body = k.get("json_body") or {}
+            if "login_with_xbox" in url or "launcher/login" in url:
+                combos.append((url, tuple(body.keys())))
+                if url.endswith("login_with_xbox"):
+                    # 模拟老端点下线 / 字段不被接受
+                    raise accounts.AccountError("bad schema", code=400,
+                                                raw="CONSTRAINT_VIOLATION")
+                return {"access_token": "MC-NEW", "expires_in": 86400}
+            if "user.auth.xboxlive.com" in url:
+                return {"Token": "X", "DisplayClaims": {"xui": [{"uhs": "U"}]}}
+            if "xsts.auth.xboxlive.com" in url:
+                return {"Token": "S", "DisplayClaims": {"xui": [{"uhs": "U"}]}}
+            return {}
+        accounts._http = fake_combo
+        acc_new = accounts.msa_finish({"access_token": "MS", "refresh_token": "R"})
+        check("老端点报错时回退到新端点", acc_new.access_token == "MC-NEW")
+        check("新端点用 xtoken 字段",
+              any("launcher/login" in u and "xtoken" in keys for u, keys in combos),
+              f"实际 {combos}")
+
+        # 6d) 401（真实账号问题）不应被当成端点问题去回退
+        tries = {"n": 0}
+
+        def fake_401(url, *a, **k):
+            if "login_with_xbox" in url or "launcher/login" in url:
+                tries["n"] += 1
+                raise accounts.AccountError("UNAUTHORIZED", code=401, raw="UNAUTHORIZED")
+            if "user.auth.xboxlive.com" in url:
+                return {"Token": "X", "DisplayClaims": {"xui": [{"uhs": "U"}]}}
+            if "xsts.auth.xboxlive.com" in url:
+                return {"Token": "S", "DisplayClaims": {"xui": [{"uhs": "U"}]}}
+            return {}
+        accounts._http = fake_401
+        raises("MC 登录 401 时不回退直接报错", accounts.AccountError,
+               accounts.msa_finish, {"access_token": "MS"})
+        check("401 只请求了一次端点", tries["n"] == 1, f"实际 {tries['n']}")
+
+        # 7) 续期失败要转成 AccountError（UI 才能提示重新登录）
+        accounts._http = lambda url, *a, **k: (_ for _ in ()).throw(
+            accounts.AccountError("invalid_grant"))
+        raises("微软续期失败抛 AccountError", accounts.AccountError,
+               accounts.msa_refresh, msa)
+
+        # 8) 没有 refresh_token 时不尝试续期
+        raises("无 refresh_token 时报错提示重新登录", accounts.AccountError,
+               accounts.msa_refresh, accounts.Account(mode=accounts.MICROSOFT))
+    finally:
+        accounts._http = orig_http
+
+    # 9) 存储：新增/去重/删除/切换（写在临时数据目录，不影响真实数据）
+    a1 = accounts.Account(mode=accounts.MICROSOFT, name="A", uuid="u1")
+    i1 = accounts.add_account(a1)
+    a1b = accounts.Account(mode=accounts.MICROSOFT, name="A2", uuid="u1")
+    i2 = accounts.add_account(a1b)
+    check("同 uuid 账户被去重", len(accounts.list_accounts()) == 1 and i1 == i2)
+    check("更新后名称生效", accounts.list_accounts()[0].name == "A2")
+    accounts.remove_account(i1)
+    check("删除账户生效", len(accounts.list_accounts()) == 0)
+    check("无账户时回落到离线", accounts.active().mode == accounts.OFFLINE)
+    check("回落离线名来自配置", accounts.active().name == config.get("user_name"))
+
+
 def test_launch():
     group("启动装配")
     vdir = paths.version_dir("zz-test-ver")
@@ -321,6 +602,65 @@ def make_png(path: str, size: int = 128) -> str:
     with open(path, "wb") as f:
         f.write(png)
     return "file:///" + path.replace("\\", "/")
+
+
+def test_dispatch_closures():
+    """回归：except 里把异常变量交给 bus.dispatch 延迟执行时，必须默认参数绑定。
+
+    Python 3 在 except 块结束时会删除 `e`；lambda 到主线程执行时 e 已不存在，
+    会抛 NameError，而 bus._pump 又静默吞掉 → 登录/下载失败时界面毫无反应。
+    """
+    group("工作线程 → 主线程 回调闭包")
+    import ast, pathlib
+
+    bad = []
+    for p in sorted(pathlib.Path("mcl").rglob("*.py")):
+        tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler) or node.name is None:
+                continue
+            name = node.name
+            for sub in ast.walk(node):
+                # 只看 bus.dispatch(lambda ...) 这类零参延迟回调
+                if not (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr == "dispatch"):
+                    continue
+                for arg in sub.args:
+                    if not isinstance(arg, ast.Lambda):
+                        continue
+                    used = {n.id for n in ast.walk(arg.body)
+                            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+                    bound = {a.arg for a in arg.args.args}
+                    if name in used and name not in bound:
+                        bad.append(f"{p}:{arg.lineno} 未绑定 {name}")
+    check("except 中的延迟回调已绑定异常变量", not bad, "; ".join(bad[:3]))
+
+    # 行为验证：except 块结束后（模拟主线程稍后才执行）回调仍能读到异常内容
+    got: dict = {}
+    holder: dict = {}
+    bad_holder: dict = {}
+
+    def _worker():
+        try:
+            raise RuntimeError("boom")
+        except Exception as e:
+            holder["ok"] = (lambda e=e: got.setdefault("msg", str(e)))
+            bad_holder["bad"] = (lambda: got.setdefault("bad", str(e)))  # 旧写法
+
+    import threading
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(5)
+    try:
+        holder["ok"]()
+    except Exception as ex:
+        got["err"] = f"{type(ex).__name__}"
+    check("默认参数绑定后延迟执行正常", got.get("msg") == "boom", str(got))
+    try:
+        bad_holder["bad"]()
+        check("旧写法(未绑定)确实会抛 NameError", False, "竟然没抛错")
+    except NameError:
+        check("旧写法(未绑定)确实会抛 NameError", True)
 
 
 def test_ui():
@@ -586,8 +926,9 @@ def main() -> int:
     print(" NCL 启动器 · 全功能测试")
     print("=" * 60)
     t0 = time.time()
-    for fn in (test_config_paths, test_utils, test_network, test_versions,
-               test_java, test_modrinth, test_translate, test_launch, test_ui):
+    for fn in (test_config_paths, test_bootstrap, test_utils, test_network, test_versions,
+               test_java, test_modrinth, test_translate, test_accounts,
+               test_dispatch_closures, test_launch, test_ui):
         try:
             fn()
         except Exception:

@@ -9,7 +9,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional
 
-from . import config, java, network, paths, utils, versions
+from . import accounts, config, java, network, paths, utils, versions
 
 log = utils.get_logger("launch")
 
@@ -207,20 +207,23 @@ def build_launch_command(version_id: str, workdir: Optional[str] = None) -> list
     ai = versions.asset_index_info(vjson)
     index_id = ai["id"] if ai else "legacy"
 
+    # 账户：正版(Microsoft)=msa、外置登录=mojang、离线=legacy
+    acc = accounts.active()
+
     cmd = [
         java_path,
         *shlex_args(config.get("jvm_args", "")),
         "-Djava.library.path=" + natives,
         "-cp", classpath,
         versions.main_class(vjson),
-        "--username", config.get("user_name", "Steve"),
+        "--username", acc.name or "Steve",
         "--version", version_id,
         "--gameDir", gdir,
         "--assetsDir", assets,
         "--assetIndex", index_id,
-        "--uuid", config.get("uuid", ""),
-        "--accessToken", config.get("access_token", "0"),
-        "--userType", "mojang" if config.get("auth_mode") == "yggdrasil" else "legacy",
+        "--uuid", acc.uuid,
+        "--accessToken", acc.access_token or "0",
+        "--userType", acc.user_type,
         "--versionType", vjson.get("type", "release"),
         "--userProperties", "{}",
         "--width", str(config.get("width", 854)),

@@ -78,15 +78,30 @@ def resolve_asset_index(index_id: str) -> str:
     return f"{BMCLAPI}/indexes/{index_id}.json"
 
 
+def _wrap(e: BaseException, url: str) -> DownloadError:
+    """把底层 socket / SSL / 超时异常统一转成 DownloadError。
+
+    不转的话，读超时会以裸 TimeoutError 冒出去，
+    上层只 catch DownloadError → 列表卡在「正在拉取…」看起来像加载不全。
+    """
+    if isinstance(e, urllib.error.HTTPError):
+        return DownloadError(f"HTTP {e.code} {url}")
+    if isinstance(e, urllib.error.URLError):
+        return DownloadError(f"网络错误 {url}: {e.reason}")
+    if isinstance(e, TimeoutError):        # 读超时（http.client / socket 层）
+        return DownloadError(f"读取超时 {url}")
+    if isinstance(e, OSError):             # 连接中断、SSL、拒绝连接等
+        return DownloadError(f"网络错误 {url}: {e}")
+    return DownloadError(f"网络错误 {url}: {e}")
+
+
 def http_text(url: str, timeout: int = 20) -> str:
     req = urllib.request.Request(url, headers=_ua())
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        raise DownloadError(f"HTTP {e.code} {url}") from e
-    except urllib.error.URLError as e:
-        raise DownloadError(f"网络错误 {url}: {e.reason}") from e
+    except BaseException as e:
+        raise _wrap(e, url) from e
 
 
 def http_json(url: str, timeout: int = 20):
@@ -150,11 +165,7 @@ def _download_once(url: str, tmp: str,
                         break
                     f.write(chunk)
                     got += len(chunk)
-                    if progress and total:
-                        progress(got, total)
-    except urllib.error.HTTPError as e:
-        raise DownloadError(f"HTTP {e.code} {url}") from e
-    except urllib.error.URLError as e:
-        raise DownloadError(f"网络错误 {url}: {e.reason}") from e
-    except (TimeoutError, ConnectionError, OSError) as e:
-        raise DownloadError(f"连接中断 {url}: {e}") from e
+            if progress and total:
+                progress(got, total)
+    except BaseException as e:
+        raise _wrap(e, url) from e

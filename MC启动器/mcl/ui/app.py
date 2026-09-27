@@ -363,6 +363,16 @@ class MainWindow:
             h = max(self._geom[1] + dy, self.root.minsize()[1])
             self.root.geometry(f"{w}x{h}")
 
+    def select_tab(self, index: int):
+        """切到指定页签（同步自绘导航条）。"""
+        try:
+            self._nav.select(index)
+        except Exception:
+            try:
+                self._nb.select(index)
+            except Exception:
+                pass
+
     def _on_tab(self, nb, idx):
         name = {0: "launcher", 1: "version", 2: "download", 3: "server",
                 4: "tunnel", 5: "settings"}.get(idx, "launcher")

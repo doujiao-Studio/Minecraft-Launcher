@@ -10,6 +10,13 @@ import sys
 
 APP_NAME = "NCL 启动器"
 
+# 首次运行时自动铺开的目录骨架
+DATA_SUBDIRS = ("versions", "servers", "relay", "logs", "cache", "cache/icons")
+MC_SUBDIRS = ("saves", "mods", "resourcepacks", "shaderpacks",
+              "screenshots", "config", "logs", "crash-reports")
+
+_FALLBACK: str | None = None
+
 
 def app_root() -> str:
     """启动器文件夹根目录：源码运行 = 项目根；exe 运行 = exe 所在目录（绿色版）。"""
@@ -18,19 +25,90 @@ def app_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def base_dir() -> str:
-    """程序数据根目录（跟随启动器文件夹，也可用环境变量 NCL_DATA_DIR 覆盖）。"""
+def _is_writable(d: str) -> bool:
+    """探测目录是否可写（exe 放在 Program Files / 受保护目录时会失败）。"""
+    try:
+        os.makedirs(d, exist_ok=True)
+        probe = os.path.join(d, ".ncl_write_test")
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("1")
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+def data_root() -> str:
+    """数据落盘根目录：优先 exe 所在目录（绿色版），不可写则回退 %LOCALAPPDATA%。"""
+    global _FALLBACK
     env = os.environ.get("NCL_DATA_DIR")
     if env:
         return os.path.abspath(env)
-    return os.path.join(app_root(), "NCLData")
+    if _FALLBACK:
+        return _FALLBACK
+    root = app_root()
+    if _is_writable(root):
+        _FALLBACK = root
+    else:
+        _FALLBACK = os.path.join(
+            os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+            "NCL-Launcher")
+    return _FALLBACK
+
+
+def base_dir() -> str:
+    """程序数据根目录（跟随启动器文件夹，也可用环境变量 NCL_DATA_DIR 覆盖）。"""
+    env = os.environ.get("NCL_DATA_DIR")
+    d = os.path.abspath(env) if env else os.path.join(data_root(), "NCLData")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def minecraft_root() -> str:
     """.minecraft 根目录（直接位于启动器文件夹内）。"""
-    d = os.path.join(app_root(), ".minecraft")
+    d = os.path.join(data_root(), ".minecraft")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+# ---------- 首次运行自举（单 exe 双击即用） ----------
+def _marker_path() -> str:
+    return os.path.join(base_dir(), ".initialized")
+
+
+def is_first_run() -> bool:
+    """是否首次运行（尚无初始化标记）。"""
+    return not os.path.exists(_marker_path())
+
+
+def mark_initialized() -> None:
+    try:
+        with open(_marker_path(), "w", encoding="utf-8") as f:
+            f.write("ok")
+    except Exception:
+        pass
+
+
+def ensure_layout() -> dict:
+    """一次性铺开所有数据目录：NCLData/* 与 .minecraft/*。
+
+    单文件 exe 双击即可用——不需要预先打包任何数据文件夹。
+    返回 {root, minecraft, created, first_run}。
+    """
+    created: list[str] = []
+    targets = [base_dir()]
+    targets += [os.path.join(base_dir(), s) for s in DATA_SUBDIRS]
+    targets += [minecraft_root()]
+    targets += [os.path.join(minecraft_root(), s) for s in MC_SUBDIRS]
+    for d in targets:
+        if not os.path.isdir(d):
+            try:
+                os.makedirs(d, exist_ok=True)
+                created.append(d)
+            except Exception:
+                pass
+    return {"root": base_dir(), "minecraft": minecraft_root(),
+            "created": created, "first_run": is_first_run()}
 
 
 def versions_dir() -> str:

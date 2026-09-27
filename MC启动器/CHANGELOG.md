@@ -2,6 +2,44 @@
 
 ---
 
+## v1.2
+
+> 单文件即用 + 正版登录。只需下载一个 exe，双击就能玩。
+
+### 🚀 首次运行即用（本次重点）
+
+- **exe 单文件即用**：Release 里只有一个 `NCL.exe`，双击自动铺开全部目录骨架——
+  - `NCLData/`：versions、servers、relay、logs、cache
+  - `.minecraft/`：saves、mods、resourcepacks、shaderpacks、screenshots、config、logs、crash-reports
+  - 默认 `config.json`（含离线 uuid）随首次启动落盘
+- 首次启动自动弹出欢迎引导，并跳转「下载中心 → 游戏本体」，选个版本下载完就能开玩
+- exe 放在受保护目录（如 `C:\Program Files`）写不进时，自动回退到 `%LOCALAPPDATA%\NCL-Launcher`
+- 不再提供 zip 免安装包：exe 本身就是绿色版，解压步骤都省了，下载体积也更小
+
+### 🔐 正版登录（Microsoft）
+
+- 新增 `mcl/accounts.py`：Microsoft OAuth 设备码登录（XBL → XSTS → Minecraft）、Yggdrasil 外置登录、离线账户三合一；refresh_token 落盘，令牌约 24 小时过期自动续期
+- 新增 `mcl/ui/account.py`：账户管理对话框（离线 / 正版登录 / 外置登录 三个页签 + 账户列表）
+- 启动页新增「账户」分区与蓝色主按钮 **正版登录 (Microsoft)**，一眼可见
+- 修复正版登录链路三处 BUG：
+  1. XSTS `RelyingParty` 必须为 `rp://api.minecraftservices.com/`
+  2. `launcher/login` 老端点需要 `xtoken` 字段（现按 400/404/405/410 自动在两个端点间回退）
+  3. 工作线程 `except ... as e` 中 `bus.dispatch(lambda: f(e))` 的异常变量在 except 块末被删除，主线程执行时抛 `NameError` 且被静默吞掉——导致登录失败无任何提示、按钮永远卡在"登录中"。现全局改为默认参数绑定（`lambda e=e:`），并新增 AST 回归测试防止复发
+
+### 📜 版本列表修复
+
+- 版本清单按发布时间（`releaseTime`）降序排序（此前错用镜像刷新时间 `time`，顺序混乱）
+- 修复服务器页 / 下载中心列表被截断（此前只显示前 40 / 60 条，现全量 916 条）
+- 修复下载中心选中版本返回 `ver-N` 假版本号的问题
+- 清单拉取失败时状态栏明确报错，不再静默
+
+### 🧪 工程质量
+
+- 测试 161 → **173 项全通过**：新增「首次运行自举」测试组（空目录自举、首次运行标记、config 落盘、游戏目录铺开）
+- CI 改为直接上传裸 exe（`NCL-<版本>.exe`），不再打 zip
+
+---
+
 ## v1.1
 
 > 品牌更名 + 界面重构 + 下载稳定性修复。纯 Python + Tkinter 实现，零第三方依赖。
