@@ -2,6 +2,20 @@
 
 ---
 
+## 📱 Android 版（NCL-Android）
+
+> 2026-09-27：桌面版功能搬到 Android，Kotlin 重写，源码在仓库根目录的 `NCL-Android/`。
+
+- 六大页签与桌面版对齐：**启动 / 版本 / 下载 / 服务器 / 穿透 / 设置**
+- **版本详情**：点进任一版本可看模组（可禁用启用）、资源包、存档（解析 `level.dat` 显示世界名 / 模式 / 版本 / 最后游玩）、数据包
+- **下载中心**：官方 900+ 游戏版本 + Modrinth 模组搜索安装 + Fabric / Quilt 自动安装
+- **登录**：Microsoft 正版设备码登录、外置登录（Yggdrasil）、离线登录，账户本地多开
+- **目录布局与桌面版一致**：`NCLData/versions/<id>/` + `.minecraft/<id>/`，首次启动静默铺开全部目录
+- 自带 JRE 管理（导入 / 下载 arm64 JRE）+ JNI 渲染桥接（gl4es / MobileGlues / Vulkan 包装）
+- 编译方式：Android Studio 打开 `NCL-Android` 目录即可（详见该目录 README）
+
+---
+
 ## v1.2
 
 > 单文件即用 + 正版登录。只需下载一个 exe，双击就能玩。
