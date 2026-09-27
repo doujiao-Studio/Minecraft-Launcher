@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 草方块：外框 + 三条草纹 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,28 L80,28 L80,80 L28,80 Z" />
+    <path
+        android:fillColor="#4A6CF7"
+        android:pathData="M32,32 L76,32 L76,76 L32,76 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,40 L72,40 L72,44 L36,44 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,52 L72,52 L72,56 L36,56 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,64 L60,64 L60,68 L36,68 Z" />
+</vector>

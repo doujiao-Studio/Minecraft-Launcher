@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与桌面版一致的靛蓝主色 -->
+    <color name="primary">#FF4A6CF7</color>
+    <color name="primary_dark">#FF3A55C9</color>
+    <color name="primary_variant">#FF7A5AF8</color>
+    <color name="accent">#FF7A5AF8</color>
+
+    <color name="bg">#FFF4F6FB</color>
+    <color name="surface">#FFFFFFFF</color>
+    <color name="border">#FFE3E8F2</color>
+    <color name="text">#FF1F2430</color>
+    <color name="text_muted">#FF7A8296</color>
+    <color name="ok">#FF2E9E5B</color>
+    <color name="warn">#FFE08A1E</color>
+    <color name="error">#FFD9433F</color>
+    <color name="log_bg">#FF14161C</color>
+    <color name="log_text">#FFC9D2E4</color>
+</resources>

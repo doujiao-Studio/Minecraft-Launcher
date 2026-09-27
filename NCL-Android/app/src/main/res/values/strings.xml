@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NCL 启动器</string>
+
+    <string name="tab_launch">启动</string>
+    <string name="tab_versions">版本</string>
+    <string name="tab_download">下载</string>
+    <string name="tab_servers">服务器</string>
+    <string name="tab_tunnel">穿透</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="detail_mods">模组</string>
+    <string name="detail_resourcepacks">资源包</string>
+    <string name="detail_saves">存档</string>
+    <string name="detail_datapacks">数据包</string>
+
+    <string name="hint_version">选择一个已安装版本</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_detail">查看详情</string>
+    <string name="action_open_dir">打开目录</string>
+    <string name="action_delete">删除</string>
+    <string name="action_toggle">禁用 / 启用</string>
+    <string name="action_install">下载</string>
+    <string name="launch">启动游戏</string>
+    <string name="offline_login">离线登录</string>
+    <string name="ms_login">正版登录 (Microsoft)</string>
+    <string name="empty_hint">这里还没有内容</string>
+</resources>
